@@ -2,6 +2,68 @@
 
 A Manifest V3 Chromium extension that detects, downloads, records, and clips web video — HLS, MPEG-DASH, and direct media URLs.
 
+## About this fork
+
+Media Sniper is an independent community fork of
+[Media Bridge](https://github.com/jvillegasd/media-bridge), created by
+[Johnny Villegas](https://github.com/jvillegasd) and its contributors. It is
+based on Media Bridge 1.11.0 at
+[`8eb5883`](https://github.com/jvillegasd/media-bridge/commit/8eb58839d336ff3a0f85ea5292db2f276663e2d6).
+
+We are grateful to Johnny and the Media Bridge contributors for the strong
+foundation: media detection, segmented downloading, live recording, browser
+processing, history, and cloud-upload support all made this project possible.
+Media Sniper preserves that work while exploring a clip-first workflow and a
+refreshed user experience.
+
+Media Sniper is independently maintained. It is not affiliated with, sponsored
+by, or endorsed by Johnny Villegas or the Media Bridge project. Please report
+Media Sniper questions and issues to this repository rather than asking the
+upstream maintainers to support fork-specific behavior.
+
+## Why Media Sniper
+
+Media Bridge already handled the difficult work of finding and processing web
+media. We wanted to make the common “save just this moment” workflow feel as
+direct as using the player itself: mark the beginning and end, choose the
+quality and accuracy tradeoff, and download the clip. The refresh focuses on
+clear controls, understandable time entry, safe network behavior, and useful
+feedback without removing the original full-download and recording features.
+
+The main additions and quality-of-life improvements are:
+
+- **Human-friendly timestamps** — Clock format (`HH:MM:SS.mmm`) is the default,
+  with a fixed three-digit millisecond field and an optional seconds
+  (`s.mmm`) view. Inputs also accept `MM:SS.mmm` and plain seconds.
+- **Player-aware marking** — Read the current time from a selected page video,
+  set the in/out points from playback, and choose the correct player when a page
+  contains more than one.
+- **Faster fine-tuning** — Nudge either boundary by ±10 seconds, ±1 second, or
+  ±0.1 second, reset the range, and see the calculated duration immediately.
+- **Optional on-page controls** — Enable a small, isolated clip overlay near the
+  active video for setting in/out points without replacing the site's player
+  controls.
+- **Browser-native clipping** — Create clips from HLS, M3U8, MPEG-DASH, MP4,
+  and WebM sources without a native helper or hosted processing service.
+- **Clear Fast and Exact modes** — Fast favors keyframe-aligned stream copying;
+  Exact targets tighter boundaries when the browser and source codecs support
+  WebCodecs conversion. Unsupported Exact jobs are explained rather than
+  silently downgraded.
+- **Rendition-aware clips** — Keep quality selection for HLS and DASH instead of
+  forcing a single stream choice.
+- **Safer direct-file handling** — Use byte-range reads when available. If a
+  server would require a full-file fetch, Media Sniper asks first and refuses
+  unknown or oversized sources instead of hiding the fallback.
+- **Better continuity and history** — Clip drafts and operations survive popup
+  closure, progress remains visible, and History records the requested range,
+  mode, boundary accuracy, and actual duration when available. Re-downloads
+  retain the previous clip settings.
+- **Earlier, clearer failures** — DRM-protected sources and unsupported live or
+  timeline layouts are rejected before unnecessary media is downloaded.
+- **Refreshed identity and release flow** — New active/inactive toolbar artwork,
+  deterministic release archives, checksum verification, and expanded unit,
+  system, and browser acceptance coverage.
+
 ## Features
 
 - **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), and direct video URLs (`.mp4`, `.webm`, etc.)
@@ -57,7 +119,7 @@ Google Drive requires you to create your own OAuth credentials (free):
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/grej/media-sniper.git
 cd media-sniper
 ```
 
@@ -326,10 +388,14 @@ written to release evidence or test logs.
 
 ## License
 
-Media Sniper is derived from
-[Media Bridge](https://github.com/jvillegasd/media-bridge) 1.11.0 at commit
-`8eb58839d336ff3a0f85ea5292db2f276663e2d6`. The existing IndexedDB name and
-internal message contracts are intentionally retained for upgrade compatibility.
+Media Sniper is distributed under the MIT License. The original Media Bridge
+copyright notice for Johnny Villegas is retained in [LICENSE](LICENSE), as
+required by the license and in appreciation of the upstream work. New
+Media Sniper changes are distributed under the same terms.
 
-MIT License — see [LICENSE](LICENSE) for the upstream copyright and full terms.
-Dependency notices are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+This fork retains Media Bridge's existing IndexedDB name and internal message
+contracts for upgrade compatibility. Dependency licenses and notices are
+recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Media Sniper is an independent project and is not endorsed by or affiliated
+with Johnny Villegas or the Media Bridge project.
