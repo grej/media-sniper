@@ -6,7 +6,12 @@ import { Parser } from "m3u8-parser";
 import { buildAbsoluteURL } from "url-toolkit";
 import { v4 as uuidv4 } from "uuid";
 import { Level, LevelType } from "../types";
-import type { ParsedPlaylist, ParsedSegment } from "./playlist-utils";
+import type {
+  ParsedPlaylist,
+  TimedParsedPlaylist,
+  TimedParsedSegment,
+} from "./playlist-utils";
+import type { ByteRangeSpec } from "../clipping/types";
 import { normalizeUrl } from "../utils/url-utils";
 import { logger } from "../utils/logger";
 
@@ -17,36 +22,119 @@ import { parseLevelsPlaylist } from "./playlist-utils";
  * Parse a media playlist into a ParsedPlaylist (protocol-agnostic intermediate).
  * Pass the result to parseLevelsPlaylist() to get Fragment[].
  */
-export function parseMediaPlaylist(playlistText: string, baseUrl: string): ParsedPlaylist {
+function normalizeByteRange(
+  byteRange: { offset: number; length: number } | undefined,
+): ByteRangeSpec | undefined {
+  if (!byteRange) return undefined;
+  return { offset: byteRange.offset, length: byteRange.length };
+}
+
+/** Convert m3u8-parser's four host integers into the 16-byte HLS IV. */
+function explicitIvBytes(iv: Uint32Array): Uint8Array {
+  const result = new Uint8Array(16);
+  const view = new DataView(result.buffer);
+  for (let index = 0; index < Math.min(iv.length, 4); index++) {
+    view.setUint32(index * 4, iv[index]!, false);
+  }
+  return result;
+}
+
+/** Preserve the historical Fragment key serialization for legacy consumers. */
+function legacyIvHex(iv: Uint32Array): string {
+  return Array.from(iv)
+    .map((word) => word.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function parseTimedMediaPlaylist(
+  playlistText: string,
+  baseUrl: string,
+): TimedParsedPlaylist {
   const parser = new Parser();
   parser.push(playlistText);
   parser.end();
 
-  const segments: ParsedSegment[] = (parser.manifest.segments || []).map((segment) => {
-    const ps: ParsedSegment = { uri: buildAbsoluteURL(baseUrl, segment.uri) };
+  const manifest = parser.manifest;
+  const mediaSequence = manifest.mediaSequence ?? 0;
+  const discontinuitySequence = manifest.discontinuitySequence ?? 0;
+  let cumulativeSeconds = 0;
 
-    if (segment.map?.uri) {
-      ps.initUri = buildAbsoluteURL(baseUrl, segment.map.uri);
-      if (segment.map.byterange) {
-        ps.initByteRange = `${segment.map.byterange.offset}:${segment.map.byterange.length}`;
-      }
-    }
+  const segments: TimedParsedSegment[] = (manifest.segments || []).map(
+    (segment, sourceIndex) => {
+      const startMs = Math.round(cumulativeSeconds * 1000);
+      cumulativeSeconds += segment.duration;
+      const endMs = Math.round(cumulativeSeconds * 1000);
+      const sequenceNumber = mediaSequence + sourceIndex;
+      const uri = buildAbsoluteURL(baseUrl, segment.uri);
 
-    if (segment.key?.uri) {
-      ps.key = {
-        uri: buildAbsoluteURL(baseUrl, segment.key.uri),
-        iv: segment.key.iv
-          ? Array.from(segment.key.iv)
-              .map((b) => b.toString(16).padStart(2, "0"))
-              .join("")
-          : null,
+      const ps: TimedParsedSegment = {
+        sourceIndex,
+        sequenceNumber,
+        uri,
+        startMs,
+        durationMs: endMs - startMs,
+        endMs,
+        discontinuitySequence: segment.timeline ?? discontinuitySequence,
       };
-    }
 
-    return ps;
-  });
+      const byteRange = normalizeByteRange(segment.byterange);
+      if (byteRange) ps.byteRange = byteRange;
 
-  return { segments };
+      if (segment.map?.uri) {
+        const initUri = buildAbsoluteURL(baseUrl, segment.map.uri);
+        const initByteRange = normalizeByteRange(segment.map.byterange);
+        ps.init = {
+          uri: initUri,
+          ...(initByteRange ? { byteRange: initByteRange } : {}),
+        };
+
+        // Legacy aliases consumed by parseLevelsPlaylist().
+        ps.initUri = initUri;
+        if (segment.map.byterange) {
+          ps.initByteRange = `${segment.map.byterange.offset}:${segment.map.byterange.length}`;
+        }
+      }
+
+      if (segment.key?.uri) {
+        const keyUri = buildAbsoluteURL(baseUrl, segment.key.uri);
+        const explicitIv = segment.key.iv
+          ? explicitIvBytes(segment.key.iv)
+          : undefined;
+
+        if (segment.key.method === "AES-128") {
+          ps.encryption = {
+            method: "AES-128",
+            keyUri,
+            sequenceNumber,
+            ...(explicitIv ? { explicitIv } : {}),
+          };
+        }
+
+        // Keep the prior serialized shape byte-for-byte for full downloads.
+        ps.key = {
+          uri: keyUri,
+          iv: segment.key.iv ? legacyIvHex(segment.key.iv) : null,
+        };
+      }
+
+      return ps;
+    },
+  );
+
+  return {
+    segments,
+    mediaSequence,
+    discontinuitySequence,
+    durationMs: Math.round(cumulativeSeconds * 1000),
+    endList: manifest.endList ?? false,
+  };
+}
+
+export function parseMediaPlaylist(
+  playlistText: string,
+  baseUrl: string,
+): ParsedPlaylist {
+  return parseTimedMediaPlaylist(playlistText, baseUrl);
 }
 
 /**
@@ -172,6 +260,7 @@ export function belongsToMasterPlaylist(
 export const M3u8Parser = {
   parseLevelsPlaylist,
   parseMediaPlaylist,
+  parseTimedMediaPlaylist,
   parseMasterPlaylist,
   isMasterPlaylist,
   isMediaPlaylist,
