@@ -1,9 +1,10 @@
 # Extension Icons
 
-Place your extension icons here:
-- `icon-16.png` (16x16 pixels)
-- `icon-48.png` (48x48 pixels)
-- `icon-128.png` (128x128 pixels)
+Media Sniper uses the blue icons for its extension identity and active toolbar
+state. The matching gray icons are used when no media has been detected.
 
-You can create these icons using any image editor or online icon generator.
+- `icon-{16,32,48,128}.png`: active/identity icons
+- `icon-gray-{16,32,48,128}.png`: inactive toolbar icons
 
+The high-resolution source artwork is stored at
+`assets/branding/media-sniper-icon-source.png`.
