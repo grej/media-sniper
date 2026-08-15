@@ -24,9 +24,11 @@ export function getVideoTitleFromUrl(url: string): string {
 export function getStatusText(stage: DownloadStage): string {
   const statusMap: Record<DownloadStage, string> = {
     [DownloadStage.DETECTING]: "Detecting",
+    [DownloadStage.PLANNING]: "Planning",
     [DownloadStage.DOWNLOADING]: "Downloading",
     [DownloadStage.RECORDING]: "Recording",
     [DownloadStage.MERGING]: "Merging",
+    [DownloadStage.PROCESSING]: "Processing",
     [DownloadStage.SAVING]: "Saving",
     [DownloadStage.UPLOADING]: "Uploading",
     [DownloadStage.COMPLETED]: "Completed",

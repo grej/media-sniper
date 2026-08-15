@@ -2,6 +2,8 @@
  * Type definitions for Media Bridge Extension
  */
 
+import type { ClipSpec } from "../clipping/types";
+
 export enum VideoFormat {
   DIRECT = "direct",
   HLS = "hls",
@@ -26,6 +28,8 @@ export interface VideoMetadata {
   hasDrm?: boolean; // Indicates if the video is DRM-protected
   unsupported?: boolean; // Indicates if the manifest uses unsupported encryption methods
   isLive?: boolean; // Indicates if the stream is a live stream (no #EXT-X-ENDLIST)
+  pageVideoId?: string; // Stable content-frame video element identifier
+  frameId?: number; // Frame that owns pageVideoId when known
 }
 
 export interface VideoQuality {
@@ -43,14 +47,29 @@ export interface VideoQuality {
  */
 export enum DownloadStage {
   DETECTING = "detecting",
+  PLANNING = "planning",
   DOWNLOADING = "downloading",
   RECORDING = "recording",
   MERGING = "merging",
+  PROCESSING = "processing",
   SAVING = "saving",
   UPLOADING = "uploading",
   COMPLETED = "completed",
   FAILED = "failed",
   CANCELLED = "cancelled",
+}
+
+export type MediaOperationKind = "download" | "clip" | "record";
+
+export interface MediaOperation {
+  kind: MediaOperationKind;
+  operationKey: string;
+  clip?: ClipSpec;
+  requestedDurationMs?: number;
+  actualDurationMs?: number;
+  accuracy?: "keyframe-aligned" | "exact";
+  qualityKey?: string;
+  outputContainer?: string;
 }
 
 export interface DownloadProgress {
@@ -81,6 +100,7 @@ export interface DownloadState {
   uploadError?: string;     // last upload failure message
   isManual?: boolean; // Indicates if download was started from manual/manifest tab
   chromeDownloadId?: number; // Chrome downloads API ID for reliable cancellation (only set when Chrome API is used)
+  operation?: MediaOperation; // Optional for v3 rows; normalized on v4 reads
   createdAt: number;
   updatedAt: number;
 }
@@ -129,6 +149,15 @@ export interface StorageConfig {
     masterPlaylistCacheSize?: number; // Max master playlists in memory (default: 50)
     dbSyncIntervalMs?: number; // IDB write throttle during segment downloads (default: 500)
   };
+  clipping?: {
+    maxClipDurationMs?: number;
+    maxInMemoryClipBytes?: number;
+    directNoRangeMaxBytes?: number;
+    mediabunnyCacheBytes?: number;
+    mediabunnyParallelism?: number;
+    overlayEnabled?: boolean;
+    defaultMode?: "fast" | "exact";
+  };
 }
 
 export interface MessageRequest {
@@ -164,4 +193,3 @@ export interface Level {
   height?: number;
   width?: number;
 }
-

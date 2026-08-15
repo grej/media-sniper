@@ -3,7 +3,14 @@
  * Routes downloads to format-specific handlers (direct, HLS, M3U8)
  */
 
-import { VideoFormat, VideoMetadata, DownloadState, DownloadStage } from "../types";
+import {
+  VideoFormat,
+  VideoMetadata,
+  DownloadState,
+  DownloadStage,
+  type MediaOperation,
+} from "../types";
+import { createOperationKey } from "../clipping/operation-key";
 import {
   getDownload,
   storeDownload,
@@ -132,8 +139,30 @@ export class DownloadManager {
     },
     isManual?: boolean,
     abortSignal?: AbortSignal,
+    downloadIdOverride?: string,
   ): Promise<DownloadState> {
-    const downloadId = generateDownloadId(url);
+    const downloadId = downloadIdOverride ?? generateDownloadId(url);
+    const operation: MediaOperation = {
+      kind: "download",
+      operationKey: createOperationKey({
+        url,
+        kind: "download",
+        quality: manifestQuality,
+        outputContainer:
+          metadata.format === VideoFormat.DIRECT
+            ? metadata.fileExtension ?? "source"
+            : "mp4",
+        pageUrl: metadata.pageUrl,
+      }),
+      qualityKey:
+        manifestQuality?.selectedBandwidth !== undefined
+          ? String(manifestQuality.selectedBandwidth)
+          : undefined,
+      outputContainer:
+        metadata.format === VideoFormat.DIRECT
+          ? metadata.fileExtension ?? "source"
+          : "mp4",
+    };
 
     try {
       // Create and initialize download state
@@ -142,6 +171,7 @@ export class DownloadManager {
         url,
         metadata,
         isManual,
+        operation,
       );
 
       // Validate format from metadata (should already be set by detection)
@@ -153,6 +183,7 @@ export class DownloadManager {
           state.metadata,
           state.createdAt,
           error,
+          operation,
         );
       }
 
@@ -220,6 +251,7 @@ export class DownloadManager {
         metadata,
         Date.now(),
         error,
+        operation,
       );
       throw error; // Re-throw after handling
     }
@@ -234,6 +266,7 @@ export class DownloadManager {
     url: string,
     metadata: VideoMetadata,
     isManual?: boolean,
+    operation?: MediaOperation,
   ): Promise<DownloadState> {
     const state: DownloadState = {
       id: downloadId,
@@ -245,6 +278,7 @@ export class DownloadManager {
         percentage: 0,
       },
       isManual,
+      operation,
       // chromeDownloadId will be set when Chrome downloads API is used (direct downloads or HLS/M3U8 final save)
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -266,6 +300,7 @@ export class DownloadManager {
     metadata: VideoMetadata,
     createdAt: number,
     error: unknown,
+    operation?: MediaOperation,
   ): Promise<DownloadState> {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -278,6 +313,7 @@ export class DownloadManager {
         stage: DownloadStage.FAILED,
         error: errorMessage,
       },
+      operation,
       // chromeDownloadId may not be set if download failed before Chrome API was used
       createdAt,
       updatedAt: Date.now(),

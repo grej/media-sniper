@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = "media-bridge";
-const DB_VERSION = 3;
+export const DB_VERSION = 4;
 export const CHUNKS_STORE_NAME = "chunks";
 export const DOWNLOADS_STORE_NAME = "downloads";
 
@@ -68,8 +68,44 @@ export function openDatabase(): Promise<IDBDatabase> {
         downloadsStore.createIndex("url", "url", { unique: false });
         downloadsStore.createIndex("updatedAt", "updatedAt", { unique: false });
         downloadsStore.createIndex("createdAt", "createdAt", { unique: false });
+        downloadsStore.createIndex(
+          "operationKey",
+          "operation.operationKey",
+          { unique: false },
+        );
+      } else if (event.oldVersion < 4) {
+        const transaction = request.transaction;
+        if (!transaction) {
+          throw new Error("IndexedDB upgrade transaction is unavailable");
+        }
+        const downloadsStore = transaction.objectStore(DOWNLOADS_STORE_NAME);
+        if (!downloadsStore.indexNames.contains("operationKey")) {
+          downloadsStore.createIndex(
+            "operationKey",
+            "operation.operationKey",
+            { unique: false },
+          );
+        }
+
+        const cursorRequest = downloadsStore.openCursor();
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) return;
+          const row = cursor.value as {
+            id: string;
+            operation?: unknown;
+            progress?: { stage?: string };
+          };
+          if (!row.operation) {
+            row.operation = {
+              kind: row.progress?.stage === "recording" ? "record" : "download",
+              operationKey: `legacy:${row.id}`,
+            };
+            cursor.update(row);
+          }
+          cursor.continue();
+        };
       }
     };
   });
 }
-
