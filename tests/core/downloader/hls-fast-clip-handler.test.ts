@@ -148,6 +148,100 @@ describe("HlsFastClipHandler", () => {
     );
   });
 
+  it("routes Exact fMP4 through selected local padding and reports measured duration", async () => {
+    const deps = baseDependencies();
+    const process = vi.fn();
+    const processExact = vi.fn().mockResolvedValue({
+      blobUrl: "blob:exact",
+      size: 4_000,
+      accuracy: "exact",
+      actualDurationMs: 3_042,
+    });
+    const downloaded: string[] = [];
+    const handler = new HlsFastClipHandler({
+      ...deps,
+      fetchManifest: vi.fn().mockResolvedValue({
+        finalUrl: "https://cdn.test/final/index.m3u8",
+        text: media("segment-", '#EXT-X-MAP:URI="init.mp4"\n'),
+      }),
+      downloadSelected: vi.fn(async (options) => {
+        downloaded.push(...options.parts.map((part) => part.uri));
+        return {
+          partCount: options.parts.length,
+          downloadedBytes: 4_000,
+          keyRequestCount: 0,
+        };
+      }),
+      process,
+      processExact,
+    });
+    const exact = request("https://cdn.test/index.m3u8", VideoFormat.M3U8);
+    exact.clip.mode = "exact";
+
+    const result = await handler.clip(
+      exact,
+      "hls_exact_fmp4",
+      settings,
+      new AbortController().signal,
+    );
+
+    expect(downloaded).toEqual([
+      "https://cdn.test/final/init.mp4",
+      "https://cdn.test/final/segment-0.m4s",
+      "https://cdn.test/final/segment-1.m4s",
+      "https://cdn.test/final/segment-2.m4s",
+    ]);
+    expect(process).not.toHaveBeenCalled();
+    expect(processExact).toHaveBeenCalledWith(expect.objectContaining({
+      payload: {
+        mediaFormat: "hls-fmp4",
+        inputKind: "combined",
+        durationMs: 3_000,
+        combinedLength: 4,
+        combinedRelativeStartMs: 2_500,
+        maxOutputBytes: 10_000_000,
+      },
+    }));
+    expect(result).toMatchObject({
+      accuracy: "exact",
+      actualDurationMs: 3_042,
+      requestedDurationMs: 3_000,
+    });
+  });
+
+  it("rejects Exact selected input at the in-memory ceiling before encoding", async () => {
+    const deps = baseDependencies();
+    const processExact = vi.fn();
+    const handler = new HlsFastClipHandler({
+      ...deps,
+      fetchManifest: vi.fn().mockResolvedValue({
+        finalUrl: "https://cdn.test/final/index.m3u8",
+        text: media("segment-", '#EXT-X-MAP:URI="init.mp4"\n'),
+      }),
+      downloadSelected: vi.fn(async (options) => ({
+        partCount: options.parts.length,
+        downloadedBytes: 4_000,
+        keyRequestCount: 0,
+      })),
+      processExact,
+    });
+    const exact = request("https://cdn.test/index.m3u8", VideoFormat.M3U8);
+    exact.clip.mode = "exact";
+    const cappedSettings = {
+      ...settings,
+      clipping: { ...settings.clipping, maxInMemoryClipBytes: 4_000 },
+    } as AppSettings;
+
+    await expect(handler.clip(
+      exact,
+      "hls_exact_capped",
+      cappedSettings,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: "OUTPUT_TOO_LARGE" });
+    expect(processExact).not.toHaveBeenCalled();
+    expect(deps.deleteOperationChunks).toHaveBeenCalledWith("hls_exact_capped");
+  });
+
   it("selects highest master variant and its associated audio group independently", async () => {
     const deps = baseDependencies();
     const fetched: string[] = [];

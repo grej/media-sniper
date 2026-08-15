@@ -4,6 +4,7 @@ import {
   Conversion,
   Input,
   MP4,
+  MPEG_TS,
   Mp4OutputFormat,
   Output,
   QTFF,
@@ -77,13 +78,13 @@ function assertRange(startMs: number, endMs: number): void {
 function createInput(source: MediabunnyClipInput): Input {
   if (source.kind === "blob") {
     return new Input({
-      formats: [MP4, WEBM, QTFF],
+      formats: [MP4, MPEG_TS, WEBM, QTFF],
       source: new BlobSource(source.blob),
     });
   }
 
   return new Input({
-    formats: [MP4, WEBM, QTFF],
+    formats: [MP4, MPEG_TS, WEBM, QTFF],
     source: new UrlSource(source.url, {
       requestInit: source.requestInit,
       fetchFn: source.fetchFn,

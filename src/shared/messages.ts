@@ -70,6 +70,8 @@ export enum MessageType {
   OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE = "OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE",
   OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP = "OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP",
   OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE = "OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE",
+  OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP = "OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP",
+  OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE = "OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE",
   OFFSCREEN_CANCEL_MEDIA_JOB = "OFFSCREEN_CANCEL_MEDIA_JOB",
 
   // Icon management
@@ -189,6 +191,35 @@ export interface FastSegmentedClipResponsePayload {
   warning?: string;
   error?: string;
   progress?: number;
+  message?: string;
+}
+
+/** Exact segmented jobs reference dense IDB namespaces; they never carry media bytes. */
+export interface ExactSegmentedClipPayload {
+  downloadId: string;
+  mediaFormat: "hls-ts" | "hls-fmp4" | "dash-fmp4";
+  inputKind: "combined" | "separate";
+  durationMs: number;
+  maxOutputBytes?: number;
+  combinedLength?: number;
+  combinedRelativeStartMs?: number;
+  videoLength?: number;
+  audioLength?: number;
+  videoRelativeStartMs?: number;
+  audioRelativeStartMs?: number;
+}
+
+export interface ExactSegmentedClipResponsePayload {
+  downloadId: string;
+  type: "success" | "error" | "progress";
+  blobUrl?: string;
+  size?: number;
+  accuracy?: "exact";
+  actualDurationMs?: number;
+  error?: string;
+  capabilityError?: boolean;
+  progress?: number;
+  processedTimeMs?: number;
   message?: string;
 }
 

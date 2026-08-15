@@ -237,6 +237,75 @@ describe("DashFastClipHandler", () => {
     );
   });
 
+  it("routes Exact DASH with independent padded windows and measured duration", async () => {
+    const deps = baseDependencies();
+    const process = vi.fn();
+    const processExact = vi.fn().mockResolvedValue({
+      blobUrl: "blob:dash-exact",
+      size: 8_000,
+      accuracy: "exact",
+      actualDurationMs: 3_018,
+    });
+    const downloaded: Record<string, string[]> = {};
+    const handler = new DashFastClipHandler({
+      ...deps,
+      fetchManifest: vi.fn().mockResolvedValue({
+        text: STATIC_MPD,
+        finalUrl: "https://edge.test/final/manifest.mpd",
+      }),
+      downloadSelected: vi.fn(async (options) => {
+        downloaded[options.trackKind] = options.parts.map((part) => part.uri);
+        return {
+          partCount: options.parts.length,
+          downloadedBytes: options.parts.length,
+          keyRequestCount: 0,
+        };
+      }),
+      process,
+      processExact,
+    });
+    const exact = request("https://origin.test/manifest.mpd");
+    exact.clip.mode = "exact";
+    exact.manifestQuality = { representationId: "v-low" };
+
+    const result = await handler.clip(
+      exact,
+      "dash_exact",
+      settings,
+      new AbortController().signal,
+    );
+
+    expect(downloaded.video).toEqual([
+      "https://edge.test/final/v-low-init.mp4",
+      "https://edge.test/final/v-low-1.m4s",
+      "https://edge.test/final/v-low-2.m4s",
+    ]);
+    expect(downloaded.audio).toEqual([
+      "https://edge.test/final/a-main-init.mp4",
+      "https://edge.test/final/a-main-1.m4s",
+      "https://edge.test/final/a-main-2.m4s",
+      "https://edge.test/final/a-main-3.m4s",
+    ]);
+    expect(process).not.toHaveBeenCalled();
+    expect(processExact).toHaveBeenCalledWith(expect.objectContaining({
+      payload: {
+        mediaFormat: "dash-fmp4",
+        inputKind: "separate",
+        durationMs: 3_000,
+        videoLength: 3,
+        audioLength: 4,
+        videoRelativeStartMs: 4_500,
+        audioRelativeStartMs: 4_500,
+        maxOutputBytes: 10_000_000,
+      },
+    }));
+    expect(result).toMatchObject({
+      accuracy: "exact",
+      actualDurationMs: 3_018,
+      requestedDurationMs: 3_000,
+    });
+  });
+
   it("uses the real selected downloader without requesting unselected segments", async () => {
     const requested: string[] = [];
     let observedPayload: unknown;
