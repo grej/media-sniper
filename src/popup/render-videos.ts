@@ -20,6 +20,7 @@ import {
 } from "./utils";
 import { startDownload } from "./download-actions";
 import { handleSendToManifestTab } from "./render-manifest";
+import { toggleDetectedClipEditor } from "./clip-actions";
 
 // SVG play icon for no-thumbnail state
 const PLAY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
@@ -120,6 +121,16 @@ export function setupDetectedVideosEventDelegation(): void {
 
   detectedVideosList.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
+
+    const clipBtn = target.closest<HTMLElement>(".video-btn-clip");
+    if (clipBtn) {
+      const url = clipBtn.dataset.url;
+      if (url) {
+        const video = detectedVideos[normalizeUrl(url)];
+        if (video) await toggleDetectedClipEditor(clipBtn, video);
+      }
+      return;
+    }
 
     // Download button
     const dlBtn = target.closest<HTMLElement>(".video-btn:not(.video-btn-manifest):not(.download-open-btn):not(.download-remove-btn):not(.download-retry-btn)");
@@ -481,6 +492,11 @@ function renderVideoItem(video: VideoMetadata): string {
                       ${buttonDisabled ? "disabled" : ""}>
                 ${buttonText}
               </button>
+              <button class="video-btn-clip"
+                      data-url="${escapeHtml(video.url)}"
+                      title="Choose timestamps and create an MP4 clip">
+                Clip
+              </button>
             ` : ""}
             ${(video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) && !hasDrm && !unsupported ? `
               <button class="video-btn-manifest"
@@ -497,6 +513,7 @@ function renderVideoItem(video: VideoMetadata): string {
               </button>
             ` : ""}
           </div>
+          <div class="clip-editor-slot"></div>
         ` : ""}
       </div>
     </div>
