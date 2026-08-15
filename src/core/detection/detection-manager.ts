@@ -26,6 +26,10 @@ import { detectFormatFromUrl } from "../utils/url-utils";
 import { DirectDetectionHandler } from "./direct/direct-detection-handler";
 import { HlsDetectionHandler } from "./hls/hls-detection-handler";
 import { DashDetectionHandler } from "./dash/dash-detection-handler";
+import {
+  redactSensitiveUrl,
+  type NetworkMediaObservation,
+} from "./network-media";
 
 /** Configuration options for DetectionManager */
 export interface DetectionManagerOptions {
@@ -76,23 +80,31 @@ export class DetectionManager {
    * Detect videos from network request
    * Routes to format-specific handler based on URL format
    */
-  handleNetworkRequest(url: string): void {
-    const format = detectFormatFromUrl(url);
+  handleNetworkRequest(request: string | NetworkMediaObservation): void {
+    const observation = typeof request === "string" ? undefined : request;
+    const url = typeof request === "string" ? request : request.url;
+    const format = observation?.format ?? detectFormatFromUrl(url);
 
     switch (format) {
       case VideoFormat.DIRECT:
-        logger.debug("[Media Sniper] Direct video detected", { url });
-        this.directHandler.handleNetworkRequest(url);
+        logger.debug("[Media Sniper] Direct video detected", {
+          url: redactSensitiveUrl(url),
+        });
+        this.directHandler.handleNetworkRequest(observation ?? url);
         break;
 
       case VideoFormat.HLS:
-        logger.debug("[Media Sniper] HLS video detected", { url });
-        this.hlsHandler.handleNetworkRequest(url);
+        logger.debug("[Media Sniper] HLS video detected", {
+          url: redactSensitiveUrl(url),
+        });
+        this.hlsHandler.handleNetworkRequest(observation?.entryUrl ?? url);
         break;
 
       case VideoFormat.DASH:
-        logger.debug("[Media Sniper] DASH video detected", { url });
-        this.dashHandler.handleNetworkRequest(url);
+        logger.debug("[Media Sniper] DASH video detected", {
+          url: redactSensitiveUrl(url),
+        });
+        this.dashHandler.handleNetworkRequest(observation?.entryUrl ?? url);
         break;
 
       default:

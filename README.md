@@ -67,7 +67,7 @@ The main additions and quality-of-life improvements are:
 ## Features
 
 - **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), and direct video URLs (`.mp4`, `.webm`, etc.)
-- **Automatic Video Detection**: Content script detects videos via DOM observation and network request interception
+- **Automatic Video Detection**: Detects late-assigned media elements, tokenized progressive video, redirects, and range-backed media proxy responses
 - **In-browser Clipping**: Create timestamped MP4 clips in Fast (keyframe-aligned) or Exact mode without a helper service
 - **Playback Marks**: Capture clip boundaries from a selected page player or enter millisecond-precise timestamps manually
 - **Live Stream Recording**: Record live HLS and DASH streams in real-time with a REC button
@@ -311,7 +311,7 @@ src/
 - `activeTab` / `scripting` — Content script injection
 - `offscreen` — Offscreen document for FFmpeg.wasm
 - `unlimitedStorage` — Large segment storage in IndexedDB
-- `webRequest` — Intercept `.m3u8` / `.mpd` network requests
+- `webRequest` — Observe media responses and redirect chains for HLS, DASH, progressive video, and range-backed proxy URLs
 - `declarativeNetRequest` — Inject `Origin`/`Referer` headers
 - `tabs` / `webNavigation` — Tab tracking for video detection
 - Host permissions (`http://*/* https://*/*`) — Fetch video content

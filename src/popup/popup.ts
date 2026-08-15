@@ -26,6 +26,7 @@ import {
 } from "./render-manifest";
 import { switchTab } from "./tabs";
 import { destroyClipEditors } from "./clip-actions";
+import { detectedVideoKeyForRemoval, upsertDetectedVideo } from "./detected-videos";
 
 const RENDER_DEBOUNCE_MS = 200;
 
@@ -194,26 +195,15 @@ async function requestDetectedVideos(): Promise<void> {
     }
     setDetectedVideos(filteredVideos);
 
-    // Merge videos from all frames, deduplicating by normalized URL
+    // Merge videos from all frames. Stable source identity deduplicates
+    // refreshed transport URLs while the record stays keyed by actionable URL.
     for (const result of frameResponses) {
       if (result.status !== "fulfilled") continue;
       const response = result.value;
       if (!response?.videos || !Array.isArray(response.videos)) continue;
 
       for (const video of response.videos as VideoMetadata[]) {
-        const normalizedVideoUrl = normalizeUrl(video.url);
-        const existing = detectedVideos[normalizedVideoUrl];
-
-        if (!existing) {
-          detectedVideos[normalizedVideoUrl] = video;
-        } else {
-          if (video.title && !existing.title) existing.title = video.title;
-          if (video.thumbnail && !existing.thumbnail) existing.thumbnail = video.thumbnail;
-          if (video.resolution && !existing.resolution) existing.resolution = video.resolution;
-          if (video.width && !existing.width) existing.width = video.width;
-          if (video.height && !existing.height) existing.height = video.height;
-          if (video.duration && !existing.duration) existing.duration = video.duration;
-        }
+        upsertDetectedVideo(detectedVideos, video);
       }
     }
 
@@ -236,33 +226,16 @@ function removeDetectedVideo(url: string | undefined): void {
 
 function addDetectedVideo(video: VideoMetadata): void {
   if (video.format === VideoFormat.UNKNOWN) {
-    const normalizedUrl = normalizeUrl(video.url);
-    if (detectedVideos[normalizedUrl]) {
-      delete detectedVideos[normalizedUrl];
+    const removalKey = detectedVideoKeyForRemoval(detectedVideos, video);
+    if (detectedVideos[removalKey]) {
+      delete detectedVideos[removalKey];
       renderDetectedVideos();
     }
     return;
   }
 
-  const normalizedUrl = normalizeUrl(video.url);
-
-  if (!detectedVideos[normalizedUrl]) {
-    detectedVideos[normalizedUrl] = video;
+  if (upsertDetectedVideo(detectedVideos, video)) {
     renderDetectedVideos();
-  } else {
-    const existing = detectedVideos[normalizedUrl];
-    let updated = false;
-
-    if (video.title && !existing.title) { existing.title = video.title; updated = true; }
-    if (video.thumbnail && !existing.thumbnail) { existing.thumbnail = video.thumbnail; updated = true; }
-    if (video.resolution && !existing.resolution) { existing.resolution = video.resolution; updated = true; }
-    if (video.width && !existing.width) { existing.width = video.width; updated = true; }
-    if (video.height && !existing.height) { existing.height = video.height; updated = true; }
-    if (video.duration && !existing.duration) { existing.duration = video.duration; updated = true; }
-
-    if (updated) {
-      renderDetectedVideos();
-    }
   }
 }
 

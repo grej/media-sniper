@@ -30,6 +30,11 @@ export interface VideoMetadata {
   isLive?: boolean; // Indicates if the stream is a live stream (no #EXT-X-ENDLIST)
   pageVideoId?: string; // Stable content-frame video element identifier
   frameId?: number; // Frame that owns pageVideoId when known
+  sourceKey?: string; // Stable detection identity, excluding rotating capability tokens
+  sourceUrl?: string; // Original pre-redirect media URL when network-observed
+  redirectChain?: string[]; // Observed HTTP redirect aliases, source to transport
+  observedAt?: number; // Epoch milliseconds for refreshing short-lived media URLs
+  contentType?: string; // Response MIME type captured during network detection
 }
 
 export interface VideoQuality {

@@ -11,6 +11,10 @@ import { logger } from "./core/utils/logger";
 import { PlaybackRegistry } from "./core/playback/registry";
 import { ClipOverlayController } from "./core/playback/clip-overlay";
 import {
+  redactSensitiveUrl,
+  type NetworkMediaObservation,
+} from "./core/detection/network-media";
+import {
   DEFAULT_CLIP_MODE,
   DEFAULT_CLIP_OVERLAY_ENABLED,
   STORAGE_CONFIG_KEY,
@@ -20,8 +24,37 @@ let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 let sentToPopup = new Set<string>();
 let lastUrl = location.href;
+let recoveredStartupNetworkMedia = false;
 const inIframe = window.self !== window.top;
 const playbackRegistry = new PlaybackRegistry();
+
+function detectedVideoKey(video: VideoMetadata): string {
+  return video.sourceKey ?? normalizeUrl(video.url);
+}
+
+function detectedVideoAliases(video: VideoMetadata): Set<string> {
+  return new Set(
+    [video.url, video.sourceUrl, ...(video.redirectChain ?? [])]
+      .filter((url): url is string => Boolean(url))
+      .map(normalizeUrl),
+  );
+}
+
+function matchingDetectedVideo(
+  video: VideoMetadata,
+): [string, VideoMetadata] | undefined {
+  const directKey = detectedVideoKey(video);
+  if (detectedVideos[directKey]) return [directKey, detectedVideos[directKey]];
+  if (video.sourceKey) {
+    const sourceMatch = Object.entries(detectedVideos).find(
+      ([, existing]) => existing.sourceKey === video.sourceKey,
+    );
+    if (sourceMatch) return sourceMatch;
+  }
+  const aliases = detectedVideoAliases(video);
+  return Object.entries(detectedVideos).find(([, existing]) =>
+    [...detectedVideoAliases(existing)].some((alias) => aliases.has(alias)));
+}
 
 function requestRuntimeMessage(message: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -90,13 +123,15 @@ function safeSendMessage(message: any): Promise<void> {
  */
 function removeDetectedVideo(url: string): void {
   const normalizedUrl = normalizeUrl(url);
+  const key = Object.entries(detectedVideos).find(([, video]) =>
+    normalizeUrl(video.url) === normalizedUrl)?.[0] ?? normalizedUrl;
 
-  if (detectedVideos[normalizedUrl]) {
-    delete detectedVideos[normalizedUrl];
-    sentToPopup.delete(normalizedUrl);
+  if (detectedVideos[key]) {
+    delete detectedVideos[key];
+    sentToPopup.delete(key);
 
     logger.info("[Media Sniper] Removed detected video", {
-      url: normalizedUrl,
+      url: redactSensitiveUrl(normalizedUrl),
     });
 
     // Notify popup about removal
@@ -117,11 +152,12 @@ function addDetectedVideo(video: VideoMetadata) {
     return;
   }
 
-  video.pageVideoId ??= playbackRegistry.findPageVideoId(video.url);
-  const normalizedUrl = normalizeUrl(video.url);
-  const existing = detectedVideos[normalizedUrl];
+  video.pageVideoId ??= playbackRegistry.findPageVideoId(video.sourceUrl ?? video.url);
+  const matched = matchingDetectedVideo(video);
+  const key = video.sourceKey ?? matched?.[1].sourceKey ?? normalizeUrl(video.url);
+  const existing = matched?.[1];
 
-  logger.debug("[Media Sniper] normalized URL", normalizedUrl);
+  logger.debug("[Media Sniper] detected media", redactSensitiveUrl(video.url));
 
   // Change icon to blue when video is detected
   safeSendMessage({
@@ -130,7 +166,17 @@ function addDetectedVideo(video: VideoMetadata) {
 
   if (existing) {
     let updated = false;
-    logger.info("Updating video metadata", { existing, video });
+    if (matched[0] !== key) {
+      delete detectedVideos[matched[0]];
+      detectedVideos[key] = existing;
+      sentToPopup.delete(matched[0]);
+      sentToPopup.add(key);
+      updated = true;
+    }
+    logger.debug("[Media Sniper] Updating detected media metadata", {
+      sourceKey: key,
+      url: redactSensitiveUrl(video.url),
+    });
 
     if (
       video.title === document.title ||
@@ -165,11 +211,20 @@ function addDetectedVideo(video: VideoMetadata) {
     if (
       video.url !== existing.url &&
       !video.url.startsWith("blob:") &&
-      !video.url.startsWith("data:")
+      !video.url.startsWith("data:") &&
+      (video.observedAt ?? 0) >= (existing.observedAt ?? 0)
     ) {
       existing.url = video.url;
       existing.format = video.format;
       updated = true;
+    }
+
+    if ((video.observedAt ?? 0) >= (existing.observedAt ?? 0)) {
+      existing.observedAt = video.observedAt ?? existing.observedAt;
+      existing.sourceUrl = video.sourceUrl ?? existing.sourceUrl;
+      existing.redirectChain = video.redirectChain ?? existing.redirectChain;
+      existing.contentType = video.contentType ?? existing.contentType;
+      existing.sourceKey = video.sourceKey ?? existing.sourceKey;
     }
 
     if (video.pageUrl !== existing.pageUrl) {
@@ -194,10 +249,10 @@ function addDetectedVideo(video: VideoMetadata) {
     return;
   }
 
-  detectedVideos[normalizedUrl] = video;
+  detectedVideos[key] = video;
 
-  if (!sentToPopup.has(normalizedUrl)) {
-    sentToPopup.add(normalizedUrl);
+  if (!sentToPopup.has(key)) {
+    sentToPopup.add(key);
     safeSendMessage({
       type: MessageType.VIDEO_DETECTED,
       payload: video,
@@ -239,6 +294,19 @@ async function init() {
 
   // Initialize all detection mechanisms
   detectionManager.init();
+
+  if (!recoveredStartupNetworkMedia) {
+    recoveredStartupNetworkMedia = true;
+    try {
+      const response = await requestRuntimeMessage({
+        type: MessageType.GET_RECENT_NETWORK_MEDIA,
+      }) as { candidates?: NetworkMediaObservation[] } | undefined;
+      response?.candidates?.forEach((candidate) =>
+        detectionManager.handleNetworkRequest(candidate));
+    } catch {
+      // The worker may be restarting; live webRequest observations will still arrive.
+    }
+  }
 }
 
 function handleClipOverlaySettingsChange(
@@ -334,11 +402,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === MessageType.NETWORK_URL_DETECTED) {
-      // Handle URL detected from service worker network interceptor
-      const url = message.payload?.url;
-      if (url && detectionManager) {
-        // Process URL through detection manager
-        detectionManager.handleNetworkRequest(url);
+      // Handle response-aware media evidence from the service worker.
+      const candidate = message.payload as NetworkMediaObservation | undefined;
+      if (candidate?.url && detectionManager) {
+        detectionManager.handleNetworkRequest(candidate);
       }
       return false; // No response needed
     }
