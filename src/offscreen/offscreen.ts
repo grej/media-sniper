@@ -7,6 +7,11 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import { MessageType } from "../shared/messages";
 import { readChunkRange } from "../core/database/chunks";
+import { MediaJobQueue } from "../core/media/media-job-queue";
+import {
+  MediabunnyCapabilityError,
+  processMediabunnyClip,
+} from "../core/media/mediabunny-clip-processor";
 import { logger } from "../core/utils/logger";
 
 let ffmpegInstance: FFmpeg | null = null;
@@ -51,23 +56,8 @@ function resetFFmpeg(): void {
   }
 }
 
-/**
- * Promise-based processing queue to serialize FFmpeg jobs.
- * FFmpeg.wasm is single-threaded — concurrent exec() calls corrupt shared WASM state.
- */
-let processingQueue: Promise<void> = Promise.resolve();
-
-function enqueue<T>(job: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    processingQueue = processingQueue.then(async () => {
-      try {
-        resolve(await job());
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
-}
+const mediaJobQueue = new MediaJobQueue();
+const mediaJobControllers = new Map<string, AbortController>();
 
 const VALID_DOWNLOAD_ID = /^[a-zA-Z0-9_-]+$/;
 
@@ -571,7 +561,7 @@ function handleProcessingMessage(
   const { downloadId } = message.payload;
   sendResponse({ acknowledged: true });
 
-  enqueue(() =>
+  mediaJobQueue.enqueue(() =>
     processFn(message.payload, (progress, msg) => {
       sendToServiceWorker({
         type: responseType,
@@ -603,6 +593,114 @@ function handleProcessingMessage(
  * Handle messages from service worker
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP) {
+    const { downloadId, url, startMs, endMs, exact } = message.payload as {
+      downloadId: string;
+      url: string;
+      startMs: number;
+      endMs: number;
+      exact: boolean;
+      maxCacheSize?: number;
+      parallelism?: number;
+      maxRetries?: number;
+      retryDelayMs?: number;
+      retryBackoffFactor?: number;
+    };
+    validateDownloadId(downloadId);
+
+    const controller = new AbortController();
+    mediaJobControllers.get(downloadId)?.abort();
+    mediaJobControllers.set(downloadId, controller);
+    sendResponse({ acknowledged: true });
+
+    mediaJobQueue
+      .enqueue(async () => {
+        const result = await processMediabunnyClip({
+          input: {
+            kind: "url",
+            url,
+            requestInit: { credentials: "include" },
+            maxCacheSize: message.payload.maxCacheSize as number | undefined,
+            parallelism: message.payload.parallelism as number | undefined,
+            getRetryDelay: (attempt) => {
+              const maxRetries = (message.payload.maxRetries as number) ?? 3;
+              if (attempt >= maxRetries) return null;
+              const delayMs = (message.payload.retryDelayMs as number) ?? 100;
+              const factor =
+                (message.payload.retryBackoffFactor as number) ?? 1.15;
+              return (delayMs * factor ** attempt) / 1000;
+            },
+            fetchFn: (input, init) =>
+              fetch(
+                new Request(input, {
+                  ...init,
+                  credentials: "include",
+                }),
+              ),
+          },
+          startMs,
+          endMs,
+          exact,
+          signal: controller.signal,
+          onProgress: (progress, processedTimeMs) => {
+            sendToServiceWorker({
+              type: MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE,
+              payload: {
+                downloadId,
+                type: "progress",
+                progress,
+                processedTimeMs,
+                message: exact ? "Encoding exact clip" : "Processing clip",
+              },
+            });
+          },
+        });
+
+        const blobUrl = URL.createObjectURL(result.blob);
+        return {
+          blobUrl,
+          size: result.blob.size,
+          accuracy: result.accuracy,
+        };
+      })
+      .then((result) => {
+        sendToServiceWorker({
+          type: MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE,
+          payload: { downloadId, type: "success", ...result },
+        });
+      })
+      .catch((error) => {
+        sendToServiceWorker({
+          type: MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE,
+          payload: {
+            downloadId,
+            type: "error",
+            error:
+              error instanceof MediabunnyCapabilityError
+                ? error.message
+                : error instanceof Error
+                  ? error.message
+                  : String(error),
+            capabilityError: error instanceof MediabunnyCapabilityError,
+          },
+        });
+      })
+      .finally(() => {
+        if (mediaJobControllers.get(downloadId) === controller) {
+          mediaJobControllers.delete(downloadId);
+        }
+      });
+
+    return true;
+  }
+
+  if (message.type === MessageType.OFFSCREEN_CANCEL_MEDIA_JOB) {
+    const downloadId = message.payload?.downloadId as string;
+    mediaJobControllers.get(downloadId)?.abort();
+    sendResponse({ acknowledged: true });
+    return false;
+  }
+
   if (
     handleProcessingMessage(
       message,
