@@ -1728,6 +1728,7 @@ async function handleSetIconBlue(tabId?: number): Promise<void> {
   try {
     const iconPaths = {
       16: "icons/icon-16.png",
+      32: "icons/icon-32.png",
       48: "icons/icon-48.png",
       128: "icons/icon-128.png",
     };
@@ -1756,6 +1757,7 @@ async function handleSetIconGray(tabId?: number): Promise<void> {
   try {
     const iconPaths = {
       16: "icons/icon-gray-16.png",
+      32: "icons/icon-gray-32.png",
       48: "icons/icon-gray-48.png",
       128: "icons/icon-gray-128.png",
     };
