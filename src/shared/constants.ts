@@ -64,6 +64,18 @@ export const DEFAULT_MASTER_PLAYLIST_CACHE_SIZE = 50;
 /** IDB write interval during segment downloads (configurable via Advanced settings) */
 export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 
+// ---- Browser clipping ----
+
+export const DEFAULT_MAX_CLIP_DURATION_MS = 60 * 60 * 1_000;
+export const DEFAULT_MAX_IN_MEMORY_CLIP_BYTES = 512 * 1024 * 1024;
+export const DEFAULT_DIRECT_NO_RANGE_MAX_BYTES = 250 * 1024 * 1024;
+export const DEFAULT_MEDIABUNNY_CACHE_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_MEDIABUNNY_PARALLELISM = 2;
+export const DEFAULT_CLIP_OVERLAY_ENABLED = false;
+export const DEFAULT_CLIP_MODE = "fast" as const;
+export const DEFAULT_MIN_CLIP_DURATION_MS = 250;
+export const DEFAULT_DURATION_TOLERANCE_MS = 500;
+
 // ---- Chrome storage keys ----
 
 export const STORAGE_CONFIG_KEY = "storage_config";

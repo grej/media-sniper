@@ -11,7 +11,7 @@ acceptance evidence is recorded under `docs/development/`.
 ## Milestones
 
 - [x] M0 — Baseline, test harness, and architecture spike
-- [ ] M1 — Clipping domain model and persistence
+- [x] M1 — Clipping domain model and persistence
 - [ ] M2 — Playback registry and popup editor
 - [ ] M3 — Timed HLS/M3U8 parsing and segment planner
 - [ ] M4 — HLS/M3U8 Fast clips

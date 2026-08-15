@@ -4,12 +4,36 @@
  */
 
 import { ChromeStorage } from "../storage/chrome-storage";
-import { DownloadState, DownloadProgress } from "../types";
+import { DownloadState, DownloadProgress, DownloadStage } from "../types";
 import { logger } from "../utils/logger";
 import { normalizeUrl } from "../utils/url-utils";
 import { openDatabase, DOWNLOADS_STORE_NAME } from "./connection";
 
 const STORAGE_KEY_DOWNLOAD_QUEUE = "download_queue";
+
+const ACTIVE_STAGES = new Set<DownloadStage>([
+  DownloadStage.DETECTING,
+  DownloadStage.PLANNING,
+  DownloadStage.DOWNLOADING,
+  DownloadStage.RECORDING,
+  DownloadStage.MERGING,
+  DownloadStage.PROCESSING,
+  DownloadStage.SAVING,
+  DownloadStage.UPLOADING,
+]);
+
+/** Add v4 operation defaults without making older persisted rows unreadable. */
+export function withOperationDefaults(state: DownloadState): DownloadState {
+  if (state.operation) return state;
+  return {
+    ...state,
+    operation: {
+      kind:
+        state.progress.stage === DownloadStage.RECORDING ? "record" : "download",
+      operationKey: `legacy:${state.id}`,
+    },
+  };
+}
 
 /**
  * Get all download states
@@ -31,7 +55,7 @@ export async function getAllDownloads(): Promise<DownloadState[]> {
     });
 
     // Connection is reused via caching, no close needed
-    return downloads;
+    return downloads.map(withOperationDefaults);
   } catch (error) {
     logger.error("Failed to get all downloads:", error);
     return [];
@@ -51,7 +75,8 @@ export async function getDownload(id: string): Promise<DownloadState | null> {
       (resolve, reject) => {
         const request = store.get(id);
         request.onsuccess = () => {
-          resolve((request.result as DownloadState) || null);
+          const result = request.result as DownloadState | undefined;
+          resolve(result ? withOperationDefaults(result) : null);
         };
         request.onerror = () => {
           reject(new Error(`Failed to get download: ${request.error}`));
@@ -126,6 +151,34 @@ export async function getDownloadByVideoId(
   }
 }
 
+/** Get an operation by its deterministic duplicate-detection key. */
+export async function getDownloadByOperationKey(
+  operationKey: string,
+): Promise<DownloadState | null> {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
+    const operationIndex = store.index("operationKey");
+    const row = await new Promise<DownloadState | undefined>((resolve, reject) => {
+      const request = operationIndex.get(operationKey);
+      request.onsuccess = () => resolve(request.result as DownloadState | undefined);
+      request.onerror = () =>
+        reject(new Error(`Failed to get download by operation key: ${request.error}`));
+    });
+    return row ? withOperationDefaults(row) : null;
+  } catch (error) {
+    logger.error("Failed to get download by operation key:", error);
+    return null;
+  }
+}
+
+/** Durable operations that may need duplicate-map reconstruction on startup. */
+export async function getActiveDownloads(): Promise<DownloadState[]> {
+  const downloads = await getAllDownloads();
+  return downloads.filter((download) => ACTIVE_STAGES.has(download.progress.stage));
+}
+
 /**
  * Store or update download state
  */
@@ -136,7 +189,7 @@ export async function storeDownload(state: DownloadState): Promise<void> {
     const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
 
     const updatedState: DownloadState = {
-      ...state,
+      ...withOperationDefaults(state),
       updatedAt: Date.now(),
     };
 
@@ -289,4 +342,3 @@ export async function removeFromDownloadQueue(id: string): Promise<void> {
   const filtered = queue.filter((qId) => qId !== id);
   await ChromeStorage.set(STORAGE_KEY_DOWNLOAD_QUEUE, filtered);
 }
-

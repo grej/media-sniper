@@ -23,6 +23,13 @@ import {
   DEFAULT_DB_SYNC_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
   DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
+  DEFAULT_MAX_CLIP_DURATION_MS,
+  DEFAULT_MAX_IN_MEMORY_CLIP_BYTES,
+  DEFAULT_DIRECT_NO_RANGE_MAX_BYTES,
+  DEFAULT_MEDIABUNNY_CACHE_BYTES,
+  DEFAULT_MEDIABUNNY_PARALLELISM,
+  DEFAULT_CLIP_OVERLAY_ENABLED,
+  DEFAULT_CLIP_MODE,
 } from "../../shared/constants";
 
 export interface AppSettings {
@@ -57,6 +64,16 @@ export interface AppSettings {
   notifications: {
     notifyOnCompletion: boolean;
     autoOpenFile: boolean;
+  };
+
+  clipping: {
+    maxClipDurationMs: number;
+    maxInMemoryClipBytes: number;
+    directNoRangeMaxBytes: number;
+    mediabunnyCacheBytes: number;
+    mediabunnyParallelism: number;
+    overlayEnabled: boolean;
+    defaultMode: "fast" | "exact";
   };
 
   advanced: {
@@ -105,6 +122,25 @@ export async function loadSettings(): Promise<AppSettings> {
     notifications: {
       notifyOnCompletion: raw?.notifications?.notifyOnCompletion ?? false,
       autoOpenFile: raw?.notifications?.autoOpenFile ?? false,
+    },
+
+    clipping: {
+      maxClipDurationMs:
+        raw?.clipping?.maxClipDurationMs ?? DEFAULT_MAX_CLIP_DURATION_MS,
+      maxInMemoryClipBytes:
+        raw?.clipping?.maxInMemoryClipBytes ??
+        DEFAULT_MAX_IN_MEMORY_CLIP_BYTES,
+      directNoRangeMaxBytes:
+        raw?.clipping?.directNoRangeMaxBytes ??
+        DEFAULT_DIRECT_NO_RANGE_MAX_BYTES,
+      mediabunnyCacheBytes:
+        raw?.clipping?.mediabunnyCacheBytes ?? DEFAULT_MEDIABUNNY_CACHE_BYTES,
+      mediabunnyParallelism:
+        raw?.clipping?.mediabunnyParallelism ??
+        DEFAULT_MEDIABUNNY_PARALLELISM,
+      overlayEnabled:
+        raw?.clipping?.overlayEnabled ?? DEFAULT_CLIP_OVERLAY_ENABLED,
+      defaultMode: raw?.clipping?.defaultMode ?? DEFAULT_CLIP_MODE,
     },
 
     advanced: {
