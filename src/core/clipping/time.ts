@@ -128,6 +128,12 @@ export function formatTimeMs(milliseconds: number): string {
   return `${minutes.toString().padStart(2, "0")}:${secondText}`;
 }
 
+/** Fixed-width UI clock with a three-digit millisecond field. */
+export function formatClockTimeMs(milliseconds: number): string {
+  const normalized = formatTimeMs(milliseconds);
+  return normalized.split(":").length === 2 ? `00:${normalized}` : normalized;
+}
+
 /** A compact, colon-free timestamp suitable for filenames. */
 export function formatTimeForFilename(milliseconds: number): string {
   assertMilliseconds(milliseconds);

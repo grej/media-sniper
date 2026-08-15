@@ -107,10 +107,6 @@ export default defineConfig(({ mode }) => {
             src: 'manifest.json',
             dest: '.',
           },
-          {
-            src: 'public/ffmpeg',
-            dest: 'ffmpeg',
-          },
         ],
       }),
       // Plugin to move HTML files to correct locations and fix script paths

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Media Bridge Settings</title>
+  <title>Media Sniper Settings</title>
   <link rel="stylesheet" href="/shared.css">
   <style>
     :root { --sidebar-width: 220px; }
@@ -611,6 +611,19 @@
       margin-bottom: 5px;
     }
 
+    .history-operation {
+      margin: -1px 0 6px;
+      color: var(--text-secondary);
+      font-size: 11px;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .badge-clip {
+      color: #c4b5fd;
+      background: rgba(139, 92, 246, 0.14);
+    }
+
     .history-badges {
       display: flex;
       align-items: center;
@@ -849,8 +862,8 @@
     <!-- ---- Sidebar ---- -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <img src="../icons/icon-32.png" class="sidebar-logo" alt="Media Bridge">
-        <span class="sidebar-title">Media Bridge</span>
+        <img src="../icons/icon-32.png" class="sidebar-logo" alt="Media Sniper">
+        <span class="sidebar-title">Media Sniper</span>
       </div>
 
       <nav class="sidebar-nav">
@@ -867,6 +880,16 @@
             <line x1="17" y1="16" x2="23" y2="16"></line>
           </svg>
           <span>Download Settings</span>
+        </button>
+
+        <button class="nav-item" data-view="clipping" title="Clipping">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="7" r="3"></circle>
+            <circle cx="6" cy="17" r="3"></circle>
+            <line x1="8.6" y1="8.5" x2="21" y2="15"></line>
+            <line x1="8.6" y1="15.5" x2="21" y2="9"></line>
+          </svg>
+          <span>Clipping</span>
         </button>
 
         <button class="nav-item" data-view="cloud-providers" title="Cloud Providers">
@@ -983,6 +1006,67 @@
 
         <div class="btn-row">
           <button id="save-download-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+      </div>
+
+      <!-- ===== Clipping Settings View ===== -->
+      <div id="view-clipping" class="view">
+        <div class="view-header">
+          <h1>Clipping</h1>
+          <p>Set safe clip limits, processing resources, and page controls.</p>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Clip Limits</h2>
+          <div class="form-group">
+            <label class="form-label" for="clip-max-duration">Maximum clip duration (minutes)</label>
+            <input type="number" id="clip-max-duration" class="form-input" min="0.25" max="1440" step="0.25" style="max-width:140px;" />
+            <div class="form-help">Reject clips longer than this limit (0.25–1,440 minutes).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="clip-max-memory">Maximum in-memory clip size (MiB)</label>
+            <input type="number" id="clip-max-memory" class="form-input" min="32" max="4096" step="1" style="max-width:140px;" />
+            <div class="form-help">Upper bound for clip data held in memory (32–4,096 MiB).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="clip-no-range-limit">Direct source no-range limit (MiB)</label>
+            <input type="number" id="clip-no-range-limit" class="form-input" min="16" max="2048" step="1" style="max-width:140px;" />
+            <div class="form-help">Largest direct source allowed when the server cannot serve byte ranges.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Processing</h2>
+          <div class="form-group">
+            <label class="form-label" for="clip-cache-size">Mediabunny cache (MiB)</label>
+            <input type="number" id="clip-cache-size" class="form-input" min="8" max="1024" step="1" style="max-width:140px;" />
+            <div class="form-help">Memory cache available to exact clipping (8–1,024 MiB).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="clip-parallelism">Clip download parallelism</label>
+            <input type="number" id="clip-parallelism" class="form-input" min="1" max="8" step="1" style="max-width:140px;" />
+            <div class="form-help">Concurrent clip fragment requests (1–8).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="clip-default-mode">Default clip mode</label>
+            <select id="clip-default-mode" class="form-input" style="max-width:220px;">
+              <option value="fast">Fast — keyframe aligned</option>
+              <option value="exact">Exact — precise timing</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">On-page Controls</h2>
+          <label class="toggle-row" style="margin-top:0;">
+            <input type="checkbox" id="clip-overlay-enabled" />
+            <span>Show clip controls over pages with video</span>
+          </label>
+          <div class="form-help" style="margin-top:6px;">Off by default. When enabled, a small page overlay can mark start and end times from current playback.</div>
+        </div>
+
+        <div class="btn-row">
+          <button id="save-clipping-settings" class="btn btn-primary">Save Settings</button>
         </div>
       </div>
 
@@ -1388,9 +1472,9 @@
           <h2 class="view-title">About</h2>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 48px 24px; gap: 16px; text-align:center;">
-          <img src="/icons/icon-128.png" alt="Media Bridge" width="72" height="72" style="border-radius:16px;">
+          <img src="/icons/icon-128.png" alt="Media Sniper" width="72" height="72" style="border-radius:16px;">
           <div>
-            <h3 style="font-size:20px; font-weight:700; margin:0 0 4px;">Media Bridge</h3>
+            <h3 style="font-size:20px; font-weight:700; margin:0 0 4px;">Media Sniper</h3>
             <p style="font-size:13px; color:var(--text-secondary); margin:0;">Version <span id="about-version">—</span></p>
           </div>
           <p style="font-size:14px; color:var(--text-secondary); margin:0;">

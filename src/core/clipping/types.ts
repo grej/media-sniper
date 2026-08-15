@@ -52,6 +52,8 @@ export interface MediaOperation {
   actualDurationMs?: number;
   accuracy?: "keyframe-aligned" | "exact";
   qualityKey?: string;
+  manifestQuality?: ManifestQualitySelection;
+  allowFullFetchForDirect?: boolean;
   outputContainer?: ClipOutputContainer;
 }
 

@@ -1,4 +1,4 @@
-# Media Bridge Clipper implementation status
+# Media Sniper implementation status
 
 This repository is implementing the accompanying canonical contract
 `media-bridge-clipper-plan.md`, based on upstream Media Bridge commit
@@ -18,9 +18,9 @@ acceptance evidence is recorded under `docs/development/`.
 - [x] M5 — DASH Fast clips
 - [x] M6 — Direct MP4/WebM clips
 - [x] M7 — Exact segmented clips
-- [ ] M8 — Overlay, polish, regression, and release
+- [x] M8 — Overlay, polish, regression, and release
 
 M0 browser evidence covers Vite/CSP bundling, Blob Fast and Exact conversion,
-Mediabunny custom-fetch Range requests, progress, and cancellation. The final
-unpacked Chrome/Brave matrix remains part of M8 because the connected in-app
-browser cannot install unpacked extensions.
+Mediabunny custom-fetch Range requests, progress, and cancellation. M8 adds the
+recorded unpacked Chrome/Brave matrix, Playwright extension E2E, reproducible
+release packaging, and the complete acceptance evidence.

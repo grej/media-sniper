@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Media Sniper E2E Player</title>
+    <style>
+      body { margin: 32px; font-family: system-ui, sans-serif; }
+      video { display: block; width: 640px; height: 360px; background: #111; }
+    </style>
+  </head>
+  <body>
+    <h1>Local extension fixture</h1>
+    <video
+      id="fixture-video"
+      controls
+      muted
+      preload="metadata"
+      src="/tests/fixtures/direct-source.webm"
+    ></video>
+  </body>
+</html>

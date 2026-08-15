@@ -1,7 +1,7 @@
 # Third-party notices
 
-Media Bridge remains licensed under the MIT License. Its dependencies retain
-their own licenses.
+Media Sniper is derived from Media Bridge 1.11.0 and remains licensed under the
+upstream MIT License. Its dependencies retain their own licenses.
 
 ## Mediabunny
 

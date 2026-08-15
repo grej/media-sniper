@@ -7,8 +7,9 @@
 
 ## Context
 
-Media Bridge already processes segmented HLS and DASH media with a serialized
-FFmpeg.wasm queue in an offscreen document. Direct downloads bypass processing.
+Media Sniper extends the upstream Media Bridge processing paths for segmented
+HLS and DASH media, including its serialized FFmpeg.wasm offscreen queue.
+Direct downloads continue to bypass processing.
 Clipping must preserve those paths, avoid full-file network transfers when the
 source supports ranges, and provide truthful fast and exact modes without a
 native helper or server.

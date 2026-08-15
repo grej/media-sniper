@@ -13,9 +13,18 @@ npm run build
 
 # TypeScript type checking only (no emit)
 npm run type-check
+
+# Unit and integration tests
+npm test
+
+# Deterministic release archive and checksum verification
+npm run package
+npm run package:check
 ```
 
-There are no tests in this project. After building, load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
+After building, load the `dist/` directory as an unpacked extension in Chrome
+(`chrome://extensions/` → Developer mode → Load unpacked). Release archives are
+written to `artifacts/`.
 
 ## Output Size Limit
 
@@ -67,7 +76,7 @@ The S3 secret access key can be encrypted at rest with AES-GCM via `SecureStorag
 
 ## Architecture
 
-Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
+Media Sniper is a Manifest V3 Chrome extension. It has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
 
 1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Intercepts `.m3u8` and `.mpd` network requests via `chrome.webRequest.onCompleted`.
 

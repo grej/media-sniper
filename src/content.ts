@@ -8,8 +8,13 @@ import { VideoMetadata, VideoFormat, StorageConfig } from "./core/types";
 import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
-import { STORAGE_CONFIG_KEY } from "./shared/constants";
 import { PlaybackRegistry } from "./core/playback/registry";
+import { ClipOverlayController } from "./core/playback/clip-overlay";
+import {
+  DEFAULT_CLIP_MODE,
+  DEFAULT_CLIP_OVERLAY_ENABLED,
+  STORAGE_CONFIG_KEY,
+} from "./shared/constants";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
@@ -17,6 +22,43 @@ let sentToPopup = new Set<string>();
 let lastUrl = location.href;
 const inIframe = window.self !== window.top;
 const playbackRegistry = new PlaybackRegistry();
+
+function requestRuntimeMessage(message: unknown): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(response);
+    });
+  });
+}
+
+async function openExtensionUi(): Promise<void> {
+  const actionApi = (chrome as typeof chrome & {
+    action?: { openPopup?: () => Promise<void> };
+  }).action;
+  if (actionApi?.openPopup) {
+    try {
+      await actionApi.openPopup();
+      return;
+    } catch {
+      // Fall back to the options page when this Chrome context cannot open the action.
+    }
+  }
+  await chrome.runtime.openOptionsPage();
+}
+
+const clipOverlay = new ClipOverlayController({
+  registry: playbackRegistry,
+  sendMessage: requestRuntimeMessage,
+  openExtensionUi,
+  isCandidateEligible: (candidate) => {
+    const associated = Object.values(detectedVideos)
+      .filter((video) => video.pageVideoId === candidate.pageVideoId);
+    return !associated.some((video) =>
+      video.hasDrm || video.unsupported || video.format === VideoFormat.UNKNOWN);
+  },
+});
 
 /**
  * Send message to popup with error handling for extension context invalidation
@@ -53,7 +95,7 @@ function removeDetectedVideo(url: string): void {
     delete detectedVideos[normalizedUrl];
     sentToPopup.delete(normalizedUrl);
 
-    logger.info("[Media Bridge] Removed detected video", {
+    logger.info("[Media Sniper] Removed detected video", {
       url: normalizedUrl,
     });
 
@@ -79,7 +121,7 @@ function addDetectedVideo(video: VideoMetadata) {
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
 
-  logger.debug("[Media Bridge] normalized URL", normalizedUrl);
+  logger.debug("[Media Sniper] normalized URL", normalizedUrl);
 
   // Change icon to blue when video is detected
   safeSendMessage({
@@ -179,6 +221,10 @@ async function init() {
 
   const stored = await chrome.storage.local.get(STORAGE_CONFIG_KEY);
   const config: StorageConfig | undefined = stored[STORAGE_CONFIG_KEY];
+  clipOverlay.setDefaultMode(config?.clipping?.defaultMode ?? DEFAULT_CLIP_MODE);
+  clipOverlay.setEnabled(
+    config?.clipping?.overlayEnabled ?? DEFAULT_CLIP_OVERLAY_ENABLED,
+  );
 
   detectionManager = new DetectionManager({
     onVideoDetected: (video) => {
@@ -195,6 +241,29 @@ async function init() {
   detectionManager.init();
 }
 
+function handleClipOverlaySettingsChange(
+  changes: Record<string, chrome.storage.StorageChange>,
+  areaName: string,
+): void {
+  if (areaName !== "local" || !changes[STORAGE_CONFIG_KEY]) return;
+  const config = changes[STORAGE_CONFIG_KEY].newValue as StorageConfig | undefined;
+  clipOverlay.setDefaultMode(config?.clipping?.defaultMode ?? DEFAULT_CLIP_MODE);
+  clipOverlay.setEnabled(
+    config?.clipping?.overlayEnabled ?? DEFAULT_CLIP_OVERLAY_ENABLED,
+  );
+}
+
+chrome.storage.onChanged.addListener(handleClipOverlaySettingsChange);
+
+function cleanupClipOverlay(event: PageTransitionEvent): void {
+  if (event.persisted) return;
+  clipOverlay.destroy();
+  chrome.storage.onChanged.removeListener(handleClipOverlaySettingsChange);
+  window.removeEventListener("pagehide", cleanupClipOverlay);
+}
+
+window.addEventListener("pagehide", cleanupClipOverlay);
+
 /**
  * Handle SPA navigation by resetting detection state
  * Covers pushState/replaceState (popstate) and Navigation API
@@ -204,7 +273,7 @@ function handleNavigation(): void {
   if (currentUrl === lastUrl) return;
   lastUrl = currentUrl;
 
-  logger.info("[Media Bridge] SPA navigation detected, resetting detection");
+  logger.info("[Media Sniper] SPA navigation detected, resetting detection");
 
   // Clean up old detection resources
   if (detectionManager) {

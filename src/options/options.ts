@@ -61,6 +61,14 @@ import {
   MIN_DB_SYNC_S,
   MAX_DB_SYNC_S,
 } from "./constants";
+import {
+  CLIPPING_FORM_LIMITS,
+  bindClippingSettingsSave,
+  clippingFormToSettings,
+  clippingSettingsToForm,
+} from "./clipping-settings";
+import { createHistoryOperationDetails } from "./history-operation";
+import { createHistoryRedownloadAction } from "./history-redownload";
 
 const FINISHED_STAGES = new Set([
   DownloadStage.COMPLETED,
@@ -80,7 +88,7 @@ function init(): void {
 
   // Check URL hash to navigate directly to a view (e.g. opened via history button)
   const hash = location.hash.slice(1);
-  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced", "about"]);
+  const validViews = new Set(["clipping", "history", "cloud-providers", "recording", "notifications", "advanced", "about"]);
   switchView(validViews.has(hash) ? hash : "download-settings");
 }
 
@@ -115,6 +123,7 @@ function switchView(viewId: string): void {
 
   // Lazy-load view content on first activation
   if (viewId === "download-settings") loadDownloadSettings();
+  if (viewId === "clipping") loadClippingSettings();
   if (viewId === "history") loadHistory();
   if (viewId === "cloud-providers") {
     loadDriveSettings();
@@ -216,6 +225,85 @@ async function saveDownloadSettings(): Promise<void> {
     config.maxConcurrent = maxConcurrent;
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
     showStatus("Settings saved.", "success");
+  } catch (err) {
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Settings";
+  }
+}
+
+// ─────────────────────────────────────────────
+// Section: Clipping Settings View
+// ─────────────────────────────────────────────
+
+async function loadClippingSettings(): Promise<void> {
+  const values = clippingSettingsToForm((await loadSettings()).clipping);
+  const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+  input("clip-max-duration").value = values.maxClipDurationMinutes.toString();
+  input("clip-max-memory").value = values.maxInMemoryMiB.toString();
+  input("clip-no-range-limit").value = values.directNoRangeMiB.toString();
+  input("clip-cache-size").value = values.mediabunnyCacheMiB.toString();
+  input("clip-parallelism").value = values.mediabunnyParallelism.toString();
+  input("clip-overlay-enabled").checked = values.overlayEnabled;
+  (document.getElementById("clip-default-mode") as HTMLSelectElement).value = values.defaultMode;
+  const saveButton = document.getElementById("save-clipping-settings") as HTMLButtonElement | null;
+  if (saveButton) bindClippingSettingsSave(saveButton, saveClippingSettings);
+}
+
+async function saveClippingSettings(): Promise<void> {
+  const btn = document.getElementById("save-clipping-settings") as HTMLButtonElement;
+  const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const duration = validateField(
+    input("clip-max-duration"),
+    CLIPPING_FORM_LIMITS.maxClipDurationMinutes.min,
+    CLIPPING_FORM_LIMITS.maxClipDurationMinutes.max,
+  );
+  const memory = validateField(
+    input("clip-max-memory"),
+    CLIPPING_FORM_LIMITS.maxInMemoryMiB.min,
+    CLIPPING_FORM_LIMITS.maxInMemoryMiB.max,
+    true,
+  );
+  const noRange = validateField(
+    input("clip-no-range-limit"),
+    CLIPPING_FORM_LIMITS.directNoRangeMiB.min,
+    CLIPPING_FORM_LIMITS.directNoRangeMiB.max,
+    true,
+  );
+  const cache = validateField(
+    input("clip-cache-size"),
+    CLIPPING_FORM_LIMITS.mediabunnyCacheMiB.min,
+    CLIPPING_FORM_LIMITS.mediabunnyCacheMiB.max,
+    true,
+  );
+  const parallelism = validateField(
+    input("clip-parallelism"),
+    CLIPPING_FORM_LIMITS.mediabunnyParallelism.min,
+    CLIPPING_FORM_LIMITS.mediabunnyParallelism.max,
+    true,
+  );
+  if ([duration, memory, noRange, cache, parallelism].some((value) => value === null)) return;
+
+  const modeValue = (document.getElementById("clip-default-mode") as HTMLSelectElement).value;
+  const defaultMode = modeValue === "exact" ? "exact" : "fast";
+  const clipping = clippingFormToSettings({
+    maxClipDurationMinutes: duration!,
+    maxInMemoryMiB: memory!,
+    directNoRangeMiB: noRange!,
+    mediabunnyCacheMiB: cache!,
+    mediabunnyParallelism: parallelism!,
+    overlayEnabled: input("clip-overlay-enabled").checked,
+    defaultMode,
+  });
+
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.clipping = { ...config.clipping, ...clipping };
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    showStatus("Clipping settings saved.", "success");
   } catch (err) {
     showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
@@ -944,9 +1032,15 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   url.textContent = state.url;
   info.appendChild(url);
 
+  const operationDetails = createHistoryOperationDetails(state);
+  if (operationDetails) info.appendChild(operationDetails);
+
   const badges = document.createElement("div");
   badges.className = "history-badges";
   badges.appendChild(makeBadge(state.metadata.format, "badge-format"));
+  if (state.operation?.kind === "clip" && state.operation.clip) {
+    badges.appendChild(makeBadge("clip", "badge-clip"));
+  }
   if (state.metadata.isLive) badges.appendChild(makeBadge("live", "badge-live"));
   if (state.metadata.resolution || state.metadata.quality) {
     badges.appendChild(
@@ -1058,7 +1152,7 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     menu.appendChild(makeMenuItem(iconX(), "Cancel upload", () => cancelUpload(state.id)));
   }
 
-  menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url, state.metadata)));
+  menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state)));
   menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", async () => {
     await navigator.clipboard.writeText(state.url);
     showToast("URL copied to clipboard", "success");
@@ -1257,25 +1351,18 @@ async function handleHistoryUpload(downloadId: string): Promise<void> {
   }
 }
 
-async function redownload(url: string, metadata?: VideoMetadata): Promise<void> {
-  const resolvedMetadata: VideoMetadata = metadata ?? { url, format: "unknown" as any, pageUrl: url };
-  const isLive = resolvedMetadata.isLive === true;
-
-  let website: string | undefined;
+async function redownload(state: DownloadState): Promise<void> {
+  const action = createHistoryRedownloadAction(state);
   try {
-    website = new URL(resolvedMetadata.pageUrl ?? url).hostname.replace(/^www\./, "");
-  } catch {}
-
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: isLive ? MessageType.START_RECORDING : MessageType.DOWNLOAD_REQUEST,
-      payload: { url, metadata: resolvedMetadata, tabTitle: metadata?.title, website },
-    });
+    const response = await chrome.runtime.sendMessage(action.message);
     if (response?.error) return showToast(response.error, "error");
-    showToast(isLive ? "Recording started" : "Download queued", "success");
+    if (response?.success === false) {
+      return showToast(response.error || "Failed to queue operation", "error");
+    }
+    showToast(action.queuedMessage, "success");
     await fetchAndRenderHistory();
   } catch {
-    showToast("Failed to start download", "error");
+    showToast("Failed to restart operation", "error");
   }
 }
 

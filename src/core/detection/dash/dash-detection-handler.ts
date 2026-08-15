@@ -65,7 +65,7 @@ export class DashDetectionHandler {
       }
       return metadata;
     } catch (error) {
-      logger.error("[Media Bridge] Failed to fetch DASH manifest:", error);
+      logger.error("[Media Sniper] Failed to fetch DASH manifest:", error);
       return null;
     }
   }

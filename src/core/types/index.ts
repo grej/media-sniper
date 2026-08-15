@@ -1,8 +1,8 @@
 /**
- * Type definitions for Media Bridge Extension
+ * Type definitions for Media Sniper Extension
  */
 
-import type { ClipSpec } from "../clipping/types";
+import type { ClipSpec, ManifestQualitySelection } from "../clipping/types";
 
 export enum VideoFormat {
   DIRECT = "direct",
@@ -69,6 +69,8 @@ export interface MediaOperation {
   actualDurationMs?: number;
   accuracy?: "keyframe-aligned" | "exact";
   qualityKey?: string;
+  manifestQuality?: ManifestQualitySelection;
+  allowFullFetchForDirect?: boolean;
   outputContainer?: string;
 }
 

@@ -81,23 +81,23 @@ export class DetectionManager {
 
     switch (format) {
       case VideoFormat.DIRECT:
-        logger.debug("[Media Bridge] Direct video detected", { url });
+        logger.debug("[Media Sniper] Direct video detected", { url });
         this.directHandler.handleNetworkRequest(url);
         break;
 
       case VideoFormat.HLS:
-        logger.debug("[Media Bridge] HLS video detected", { url });
+        logger.debug("[Media Sniper] HLS video detected", { url });
         this.hlsHandler.handleNetworkRequest(url);
         break;
 
       case VideoFormat.DASH:
-        logger.debug("[Media Bridge] DASH video detected", { url });
+        logger.debug("[Media Sniper] DASH video detected", { url });
         this.dashHandler.handleNetworkRequest(url);
         break;
 
       default:
         // Reject unknown formats - don't process them
-        logger.debug("[Media Bridge] Unknown format detected", { url });
+        logger.debug("[Media Sniper] Unknown format detected", { url });
         break;
     }
   }

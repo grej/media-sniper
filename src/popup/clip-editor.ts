@@ -4,7 +4,7 @@ import type {
   ClipSpec,
   ManifestQualitySelection,
 } from "../core/clipping/types";
-import { formatTimeMs, tryParseTimeInput } from "../core/clipping/time";
+import { formatClockTimeMs, tryParseTimeInput } from "../core/clipping/time";
 import { validateClipRange } from "../core/clipping/validation";
 
 export interface ClipEditorDraft {
@@ -21,6 +21,7 @@ export interface ClipEditorPlayback {
   durationMs?: number;
   label?: string;
   alternatives?: Array<{ pageVideoId: string; label: string }>;
+  requiresSelection?: boolean;
 }
 
 export interface ClipEditorQualityOption {
@@ -36,12 +37,19 @@ export interface ClipEditorSubmit {
   allowFullFetchForDirect?: boolean;
 }
 
+export interface ExactCapabilityResult {
+  supported: boolean;
+  reason?: string;
+}
+
 export interface ClipEditorOptions {
   sourceKey: string;
   durationMs?: number;
   draft?: ClipEditorDraft;
+  defaultMode?: ClipMode;
   qualities?: ClipEditorQualityOption[];
   showDirectFullFetchConsent?: boolean;
+  checkExactCapability?: () => Promise<ExactCapabilityResult>;
   getPlayback?: (preferredPageVideoId?: string) => Promise<ClipEditorPlayback | null>;
   persistDraft?: (draft: ClipEditorDraft) => void | Promise<void>;
   onSubmit: (value: ClipEditorSubmit) => void | Promise<void>;
@@ -62,8 +70,7 @@ type TimeDisplay = "clock" | "seconds";
 /** Popup clock display always includes HH:MM:SS and a fixed three-digit ms field. */
 export function formatEditorTime(milliseconds: number, display: TimeDisplay = "clock"): string {
   if (display === "seconds") return (milliseconds / 1_000).toFixed(3);
-  const normalized = formatTimeMs(milliseconds);
-  return normalized.split(":").length === 2 ? `00:${normalized}` : normalized;
+  return formatClockTimeMs(milliseconds);
 }
 
 function button(label: string, className: string, title?: string): HTMLButtonElement {
@@ -83,7 +90,7 @@ function normalizeInitialDraft(options: ClipEditorOptions): ClipEditorDraft {
   return {
     startMs: options.draft?.startMs ?? 0,
     endMs: options.draft?.endMs ?? defaultEndMs,
-    mode: options.draft?.mode ?? "fast",
+    mode: options.draft?.mode ?? options.defaultMode ?? "fast",
     qualityKey: options.draft?.qualityKey,
     updatedAt: options.draft?.updatedAt,
   };
@@ -125,6 +132,7 @@ function createTimeControl(
 
 export function createClipEditor(options: ClipEditorOptions): ClipEditorController {
   const initial = normalizeInitialDraft(options);
+  const freshDefaults = normalizeInitialDraft({ ...options, draft: undefined });
   let currentPlayback: ClipEditorPlayback | null = null;
   let preferredPageVideoId: string | undefined;
   let markSource: ClipMarkSource = "manual";
@@ -144,7 +152,8 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   const current = document.createElement("span");
   current.className = "clip-current-time";
   current.textContent = options.getPlayback ? "Finding player…" : "Manual timestamps";
-  current.setAttribute("aria-live", "polite");
+  // Polling updates this value four times per second; do not spam screen readers.
+  current.setAttribute("aria-live", "off");
   const close = button("×", "clip-close-btn", "Close clip editor");
   close.setAttribute("aria-label", "Close clip editor");
   header.append(title, current, close);
@@ -155,17 +164,28 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   const end = createTimeControl("end", initial.endMs);
   fields.append(start.root, end.root);
 
+  const durationRow = document.createElement("div");
+  durationRow.className = "clip-duration-row";
+  const durationLabel = document.createElement("span");
+  durationLabel.textContent = "Duration";
+  const duration = document.createElement("output");
+  duration.className = "clip-duration";
+  duration.setAttribute("aria-label", "Clip duration");
+  durationRow.append(durationLabel, duration);
+
   const nudgeRow = document.createElement("div");
   nudgeRow.className = "clip-nudges";
-  for (const seconds of [-5, -1, 1, 5]) {
+  for (const seconds of [-10, -1, -0.1, 0.1, 1, 10]) {
     const nudge = button(
       `${seconds > 0 ? "+" : ""}${seconds}s`,
       "clip-nudge-btn",
       `Move the focused timestamp by ${seconds} seconds`,
     );
-    nudge.dataset.deltaMs = String(seconds * 1_000);
+    nudge.dataset.deltaMs = String(Math.round(seconds * 1_000));
     nudgeRow.append(nudge);
   }
+  const reset = button("Reset", "clip-reset-btn", "Reset clip marks and options");
+  nudgeRow.append(reset);
 
   const optionsRow = document.createElement("div");
   optionsRow.className = "clip-options";
@@ -228,7 +248,15 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
 
   const capability = document.createElement("div");
   capability.className = "clip-capability";
-  capability.textContent = "Exact support is checked after the source is planned.";
+  const exactOption = mode.querySelector<HTMLOptionElement>('option[value="exact"]')!;
+  let exactCapabilityKnown = !options.checkExactCapability;
+  let exactCapabilitySupported = true;
+  if (options.checkExactCapability) {
+    exactOption.disabled = true;
+    capability.textContent = "Checking exact mode support…";
+  } else {
+    capability.textContent = "Exact source compatibility is verified during planning.";
+  }
 
   const error = document.createElement("div");
   error.className = "clip-error";
@@ -240,7 +268,7 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   const submit = button("Download clip", "primary-btn clip-submit-btn");
   footer.append(submit);
 
-  root.append(header, fields, nudgeRow, optionsRow, capability, error, footer);
+  root.append(header, fields, durationRow, nudgeRow, optionsRow, capability, error, footer);
 
   const parseInputs = () => {
     const parsedStart = tryParseTimeInput(start.input.value);
@@ -271,45 +299,66 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
     const parsed = parseInputs();
     if (!parsed.value) {
       error.textContent = parsed.error ?? "Enter a valid clip range.";
+      duration.textContent = "—";
       submit.disabled = true;
       return false;
     }
     error.textContent = parsed.value.warning ?? "";
     start.input.value = formatEditorTime(parsed.value.startMs, timeDisplay);
     end.input.value = formatEditorTime(parsed.value.endMs, timeDisplay);
-    submit.disabled = false;
+    duration.textContent = formatEditorTime(parsed.value.durationMs, timeDisplay);
+    submit.disabled = mode.value === "exact"
+      && (!exactCapabilityKnown || !exactCapabilitySupported);
     return true;
   };
 
   const updateCurrent = () => {
     if (!currentPlayback) {
       current.textContent = options.getPlayback ? "No matching player — manual timestamps available" : "Manual timestamps";
+      start.setButton.disabled = true;
+      end.setButton.disabled = true;
       return;
     }
-    current.textContent = `${currentPlayback.label ? `${currentPlayback.label} · ` : ""}${formatEditorTime(currentPlayback.currentTimeMs, timeDisplay)}`;
+    current.textContent = currentPlayback.requiresSelection
+      ? "Choose a player before marking playback time"
+      : `${currentPlayback.label ? `${currentPlayback.label} · ` : ""}${formatEditorTime(currentPlayback.currentTimeMs, timeDisplay)}`;
     const alternatives = currentPlayback.alternatives ?? [];
     playerLabel.hidden = alternatives.length < 2;
     if (alternatives.length >= 2) {
-      const previous = preferredPageVideoId ?? currentPlayback.pageVideoId;
-      player.replaceChildren(...alternatives.map((alternative, index) => {
+      const previous = preferredPageVideoId;
+      const choices = alternatives.map((alternative, index) => {
         const option = document.createElement("option");
         option.value = alternative.pageVideoId;
         option.textContent = alternative.label || `Player ${index + 1}`;
         return option;
-      }));
+      });
+      if (currentPlayback.requiresSelection) {
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Choose a player…";
+        choices.unshift(placeholder);
+      }
+      player.replaceChildren(...choices);
       if (previous && alternatives.some((candidate) => candidate.pageVideoId === previous)) {
         player.value = previous;
+      } else if (currentPlayback.requiresSelection) {
+        player.value = "";
       }
     }
+    start.setButton.disabled = Boolean(currentPlayback.requiresSelection);
+    end.setButton.disabled = Boolean(currentPlayback.requiresSelection);
   };
 
   const refreshPlayback = async () => {
     if (!options.getPlayback || polling || destroyed) return;
     polling = true;
     try {
-      currentPlayback = await options.getPlayback(preferredPageVideoId);
+      const playback = await options.getPlayback(preferredPageVideoId);
+      if (destroyed) return;
+      currentPlayback = playback;
       updateCurrent();
     } catch {
+      if (destroyed) return;
       currentPlayback = null;
       updateCurrent();
     } finally {
@@ -318,8 +367,10 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   };
 
   const mark = (input: HTMLInputElement) => {
-    if (!currentPlayback) {
-      error.textContent = "No matching player is available. Enter the timestamp manually.";
+    if (!currentPlayback || currentPlayback.requiresSelection) {
+      error.textContent = currentPlayback?.requiresSelection
+        ? "Choose a player before marking playback time."
+        : "No matching player is available. Enter the timestamp manually.";
       return;
     }
     input.value = formatEditorTime(currentPlayback.currentTimeMs, timeDisplay);
@@ -346,18 +397,40 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
     const input = end.input.dataset.focused ? end.input : start.input;
     const parsed = tryParseTimeInput(input.value);
     if (!parsed.ok) return;
-    input.value = formatEditorTime(Math.max(0, parsed.milliseconds! + Number(nudge.dataset.deltaMs)), timeDisplay);
+    const knownDurationMs = currentPlayback?.durationMs ?? options.durationMs;
+    const adjusted = Math.max(
+      0,
+      parsed.milliseconds! + Number(nudge.dataset.deltaMs),
+    );
+    const clamped = knownDurationMs === undefined
+      ? adjusted
+      : Math.min(adjusted, knownDurationMs);
+    input.value = formatEditorTime(clamped, timeDisplay);
     markSource = "manual";
     normalizeAndValidate();
     void persist();
   });
-  mode.addEventListener("change", () => void persist());
+  reset.addEventListener("click", () => {
+    start.input.value = formatEditorTime(freshDefaults.startMs, timeDisplay);
+    end.input.value = formatEditorTime(freshDefaults.endMs, timeDisplay);
+    mode.value = freshDefaults.mode;
+    if (quality) quality.selectedIndex = 0;
+    if (fullFetchConsent) fullFetchConsent.checked = false;
+    markSource = "manual";
+    normalizeAndValidate();
+    void persist();
+  });
+  mode.addEventListener("change", () => {
+    normalizeAndValidate();
+    void persist();
+  });
   display.addEventListener("change", () => {
     const parsedStart = tryParseTimeInput(start.input.value);
     const parsedEnd = tryParseTimeInput(end.input.value);
     timeDisplay = display.value as TimeDisplay;
     if (parsedStart.ok) start.input.value = formatEditorTime(parsedStart.milliseconds!, timeDisplay);
     if (parsedEnd.ok) end.input.value = formatEditorTime(parsedEnd.milliseconds!, timeDisplay);
+    normalizeAndValidate();
     updateCurrent();
   });
   quality?.addEventListener("change", () => void persist());
@@ -400,6 +473,27 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   });
 
   normalizeAndValidate();
+  if (options.checkExactCapability) {
+    void options.checkExactCapability().then((result) => {
+      if (destroyed) return;
+      exactCapabilityKnown = true;
+      exactCapabilitySupported = result.supported;
+      exactOption.disabled = !result.supported;
+      capability.textContent = result.supported
+        ? "Exact mode is supported by this browser; source codecs are verified during planning."
+        : result.reason || "Exact mode is unavailable in this browser.";
+      if (!result.supported && mode.value === "exact") mode.value = "fast";
+      normalizeAndValidate();
+    }).catch(() => {
+      if (destroyed) return;
+      exactCapabilityKnown = true;
+      exactCapabilitySupported = false;
+      exactOption.disabled = true;
+      capability.textContent = "Exact mode capability could not be verified in this browser.";
+      if (mode.value === "exact") mode.value = "fast";
+      normalizeAndValidate();
+    });
+  }
   void refreshPlayback();
   const interval = options.getPlayback
     ? window.setInterval(() => void refreshPlayback(), PLAYBACK_POLL_MS)

@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VideoFormat, type VideoMetadata } from "../../src/core/types";
 import { MessageType } from "../../src/shared/messages";
+import { STORAGE_CONFIG_KEY } from "../../src/shared/constants";
 import { destroyClipEditors, toggleDetectedClipEditor } from "../../src/popup/clip-actions";
+
+vi.mock("mediabunny", () => ({
+  canEncodeVideo: vi.fn().mockResolvedValue(true),
+  canEncodeAudio: vi.fn().mockResolvedValue(true),
+}));
 
 afterEach(() => {
   destroyClipEditors();
@@ -35,6 +41,7 @@ describe("popup clip actions", () => {
     const messages: any[] = [];
     const chromeMock = {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 17, url: "https://page.test/watch" }]) },
+      storage: { local: { get: vi.fn().mockResolvedValue({}) } },
       runtime: {
         lastError: undefined,
         sendMessage: (message: any, callback: (response: any) => void) => {
@@ -77,7 +84,9 @@ describe("popup clip actions", () => {
     const inputs = document.querySelectorAll<HTMLInputElement>(".clip-time-input");
     expect([...inputs].map((input) => input.value)).toEqual(["00:00:04.000", "00:00:08.000"]);
     expect(document.querySelector<HTMLSelectElement>(".clip-mode-select")?.value).toBe("exact");
-    document.querySelector<HTMLButtonElement>(".clip-submit-btn")!.click();
+    const submit = document.querySelector<HTMLButtonElement>(".clip-submit-btn")!;
+    expect(submit.disabled).toBe(false);
+    submit.click();
 
     await vi.waitFor(() => {
       expect(messages.some((message) => message.type === MessageType.CLIP_REQUEST)).toBe(true);
@@ -97,6 +106,13 @@ describe("popup clip actions", () => {
   it("shows a player selector when candidates are ambiguous", async () => {
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 3, url: "https://page.test" }]) },
+      storage: {
+        local: {
+          get: vi.fn().mockResolvedValue({
+            [STORAGE_CONFIG_KEY]: { clipping: { defaultMode: "exact" } },
+          }),
+        },
+      },
       runtime: {
         lastError: undefined,
         sendMessage: (message: any, callback: (response: any) => void) => {
@@ -112,9 +128,19 @@ describe("popup clip actions", () => {
       format: VideoFormat.HLS,
       pageUrl: "https://page.test",
     });
+    expect(document.querySelector<HTMLSelectElement>(".clip-mode-select")?.value)
+      .toBe("exact");
     await vi.waitFor(() => {
-      expect(document.querySelector<HTMLSelectElement>(".clip-player-select")?.options).toHaveLength(2);
+      expect(document.querySelector<HTMLSelectElement>(".clip-player-select")?.options).toHaveLength(3);
     });
-    expect(document.querySelector<HTMLElement>(".clip-player-select")?.closest("label")?.hidden).toBe(false);
+    const player = document.querySelector<HTMLSelectElement>(".clip-player-select")!;
+    expect(player.closest("label")?.hidden).toBe(false);
+    expect(player.value).toBe("");
+    expect(document.querySelector<HTMLButtonElement>('[data-mark="start"]')?.disabled).toBe(true);
+    player.value = "b";
+    player.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector<HTMLButtonElement>('[data-mark="start"]')?.disabled).toBe(false);
+    });
   });
 });

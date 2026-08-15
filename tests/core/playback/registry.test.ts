@@ -83,10 +83,12 @@ describe('PlaybackRegistry', () => {
     let nextId = 0;
     const registry = new PlaybackRegistry({ createId: () => `video-${++nextId}` });
     registry.start();
+    expect(registry.getElement('video-1')).toBe(video);
     expect(registry.getCandidates()[0].pageVideoId).toBe('video-1');
 
     video.remove();
     registry.prune();
+    expect(registry.getElement('video-1')).toBeUndefined();
     expect(registry.getCandidates()).toEqual([]);
 
     document.body.append(video);
@@ -111,4 +113,3 @@ describe('PlaybackRegistry', () => {
     registry.destroy();
   });
 });
-

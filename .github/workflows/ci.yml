@@ -13,7 +13,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Install media verifier
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - run: npm ci
       - run: npm run type-check
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run package
+      - run: npm run package:check
