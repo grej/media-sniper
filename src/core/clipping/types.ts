@@ -127,3 +127,31 @@ export interface IndependentTrackClipSelection {
   video: TrackClipSelection | null;
   audio: TrackClipSelection | null;
 }
+
+export type DashTrackKind = "video" | "audio";
+
+/** DASH segment metadata retained in addition to the shared timed model. */
+export interface TimedDashMediaSegment extends TimedMediaSegment {
+  timeline: number;
+  periodStartMs: number;
+  /** Stable identity derived from the Period presentation start. */
+  periodKey: string;
+}
+
+export interface TimedDashTrack {
+  kind: DashTrackKind;
+  representationId: string;
+  bandwidth?: number;
+  codecs?: string;
+  width?: number;
+  height?: number;
+  language?: string;
+  timelineStartsMs: number[];
+  segments: TimedDashMediaSegment[];
+}
+
+export interface TimedDashTracks {
+  durationMs?: number;
+  video: TimedDashTrack;
+  audio: TimedDashTrack | null;
+}
