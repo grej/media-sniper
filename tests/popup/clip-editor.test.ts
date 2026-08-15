@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createClipEditor } from "../../src/popup/clip-editor";
+import { createClipEditor, formatEditorTime } from "../../src/popup/clip-editor";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -7,6 +7,12 @@ afterEach(() => {
 });
 
 describe("clip editor", () => {
+  it("defaults to an unambiguous clock with a three-digit millisecond field", () => {
+    expect(formatEditorTime(12_345)).toBe("00:00:12.345");
+    expect(formatEditorTime(3_723_005)).toBe("01:02:03.005");
+    expect(formatEditorTime(12_345, "seconds")).toBe("12.345");
+  });
+
   it("submits a normalized typed manual clip request", async () => {
     const onSubmit = vi.fn();
     const controller = createClipEditor({ sourceKey: "source", onSubmit });
@@ -41,7 +47,7 @@ describe("clip editor", () => {
 
     expect(getPlayback).toHaveBeenCalledTimes(1);
     controller.element.querySelector<HTMLButtonElement>('[data-mark="start"]')!.click();
-    expect(controller.element.querySelector<HTMLInputElement>(".clip-time-input")!.value).toBe("00:12.345");
+    expect(controller.element.querySelector<HTMLInputElement>(".clip-time-input")!.value).toBe("00:00:12.345");
 
     await vi.advanceTimersByTimeAsync(249);
     expect(getPlayback).toHaveBeenCalledTimes(1);
@@ -94,6 +100,25 @@ describe("clip editor", () => {
     mode.dispatchEvent(new Event("change", { bubbles: true }));
     await Promise.resolve();
     expect(persistDraft).toHaveBeenCalledWith(expect.objectContaining({ mode: "fast", qualityKey: "720p" }));
+    controller.destroy();
+  });
+
+  it("toggles between clock and decimal-seconds display without changing the range", () => {
+    const controller = createClipEditor({
+      sourceKey: "source",
+      draft: { startMs: 62_125, endMs: 65_500, mode: "fast" },
+      onSubmit: vi.fn(),
+    });
+    document.body.append(controller.element);
+    const display = controller.element.querySelector<HTMLSelectElement>(".clip-time-display-select")!;
+    display.value = "seconds";
+    display.dispatchEvent(new Event("change", { bubbles: true }));
+    expect([...controller.element.querySelectorAll<HTMLInputElement>(".clip-time-input")]
+      .map((input) => input.value)).toEqual(["62.125", "65.500"]);
+    display.value = "clock";
+    display.dispatchEvent(new Event("change", { bubbles: true }));
+    expect([...controller.element.querySelectorAll<HTMLInputElement>(".clip-time-input")]
+      .map((input) => input.value)).toEqual(["00:01:02.125", "00:01:05.500"]);
     controller.destroy();
   });
 });

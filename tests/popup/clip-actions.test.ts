@@ -75,7 +75,7 @@ describe("popup clip actions", () => {
     await Promise.resolve();
 
     const inputs = document.querySelectorAll<HTMLInputElement>(".clip-time-input");
-    expect([...inputs].map((input) => input.value)).toEqual(["00:04.000", "00:08.000"]);
+    expect([...inputs].map((input) => input.value)).toEqual(["00:00:04.000", "00:00:08.000"]);
     expect(document.querySelector<HTMLSelectElement>(".clip-mode-select")?.value).toBe("exact");
     document.querySelector<HTMLButtonElement>(".clip-submit-btn")!.click();
 

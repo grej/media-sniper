@@ -55,6 +55,15 @@ export interface ClipEditorController {
 const DEFAULT_CLIP_END_MS = 30_000;
 const PLAYBACK_POLL_MS = 250;
 
+type TimeDisplay = "clock" | "seconds";
+
+/** Popup clock display always includes HH:MM:SS and a fixed three-digit ms field. */
+export function formatEditorTime(milliseconds: number, display: TimeDisplay = "clock"): string {
+  if (display === "seconds") return (milliseconds / 1_000).toFixed(3);
+  const normalized = formatTimeMs(milliseconds);
+  return normalized.split(":").length === 2 ? `00:${normalized}` : normalized;
+}
+
 function button(label: string, className: string, title?: string): HTMLButtonElement {
   const element = document.createElement("button");
   element.type = "button";
@@ -91,7 +100,7 @@ function createTimeControl(
   input.className = "clip-time-input";
   input.inputMode = "decimal";
   input.autocomplete = "off";
-  input.value = formatTimeMs(valueMs);
+  input.value = formatEditorTime(valueMs);
   input.setAttribute("aria-describedby", `${input.id}-hint`);
   label.htmlFor = input.id;
   label.textContent = field === "start" ? "Start" : "End";
@@ -117,6 +126,7 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   let currentPlayback: ClipEditorPlayback | null = null;
   let preferredPageVideoId: string | undefined;
   let markSource: ClipMarkSource = "manual";
+  let timeDisplay: TimeDisplay = "clock";
   let destroyed = false;
   let polling = false;
 
@@ -165,6 +175,14 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
   mode.value = initial.mode;
   modeLabel.append(mode);
   optionsRow.append(modeLabel);
+
+  const displayLabel = document.createElement("label");
+  displayLabel.textContent = "Time display";
+  const display = document.createElement("select");
+  display.className = "clip-time-display-select";
+  display.innerHTML = '<option value="clock">Clock (HH:MM:SS.mmm)</option><option value="seconds">Seconds (s.mmm)</option>';
+  displayLabel.append(display);
+  optionsRow.append(displayLabel);
 
   const playerLabel = document.createElement("label");
   playerLabel.textContent = "Player";
@@ -242,8 +260,8 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
       return false;
     }
     error.textContent = parsed.value.warning ?? "";
-    start.input.value = formatTimeMs(parsed.value.startMs);
-    end.input.value = formatTimeMs(parsed.value.endMs);
+    start.input.value = formatEditorTime(parsed.value.startMs, timeDisplay);
+    end.input.value = formatEditorTime(parsed.value.endMs, timeDisplay);
     submit.disabled = false;
     return true;
   };
@@ -253,7 +271,7 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
       current.textContent = options.getPlayback ? "No matching player — manual timestamps available" : "Manual timestamps";
       return;
     }
-    current.textContent = `${currentPlayback.label ? `${currentPlayback.label} · ` : ""}${formatTimeMs(currentPlayback.currentTimeMs)}`;
+    current.textContent = `${currentPlayback.label ? `${currentPlayback.label} · ` : ""}${formatEditorTime(currentPlayback.currentTimeMs, timeDisplay)}`;
     const alternatives = currentPlayback.alternatives ?? [];
     playerLabel.hidden = alternatives.length < 2;
     if (alternatives.length >= 2) {
@@ -289,7 +307,7 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
       error.textContent = "No matching player is available. Enter the timestamp manually.";
       return;
     }
-    input.value = formatTimeMs(currentPlayback.currentTimeMs);
+    input.value = formatEditorTime(currentPlayback.currentTimeMs, timeDisplay);
     markSource = "playback";
     normalizeAndValidate();
     void persist();
@@ -313,12 +331,20 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
     const input = end.input.dataset.focused ? end.input : start.input;
     const parsed = tryParseTimeInput(input.value);
     if (!parsed.ok) return;
-    input.value = formatTimeMs(Math.max(0, parsed.milliseconds! + Number(nudge.dataset.deltaMs)));
+    input.value = formatEditorTime(Math.max(0, parsed.milliseconds! + Number(nudge.dataset.deltaMs)), timeDisplay);
     markSource = "manual";
     normalizeAndValidate();
     void persist();
   });
   mode.addEventListener("change", () => void persist());
+  display.addEventListener("change", () => {
+    const parsedStart = tryParseTimeInput(start.input.value);
+    const parsedEnd = tryParseTimeInput(end.input.value);
+    timeDisplay = display.value as TimeDisplay;
+    if (parsedStart.ok) start.input.value = formatEditorTime(parsedStart.milliseconds!, timeDisplay);
+    if (parsedEnd.ok) end.input.value = formatEditorTime(parsedEnd.milliseconds!, timeDisplay);
+    updateCurrent();
+  });
   quality?.addEventListener("change", () => void persist());
   player.addEventListener("change", () => {
     preferredPageVideoId = player.value;
