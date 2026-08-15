@@ -5,9 +5,19 @@
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
-import { MessageType } from "../shared/messages";
+import {
+  MessageType,
+  type FastSegmentedClipPayload,
+} from "../shared/messages";
 import { readChunkRange } from "../core/database/chunks";
+import {
+  clipTrackNamespace,
+  deleteClipOperationChunks,
+  type ClipTrackKind,
+} from "../core/database/clip-chunks";
+import { buildFastSegmentedClipArgs } from "../core/ffmpeg/fast-segmented-args";
 import { MediaJobQueue } from "../core/media/media-job-queue";
+import { runAbortableMediaJob } from "../core/media/abortable-media-job";
 import {
   MediabunnyCapabilityError,
   processMediabunnyClip,
@@ -107,6 +117,27 @@ async function concatenateChunks(
     missingCount,
     totalCount: length,
   };
+}
+
+async function concatenateSelectedTrack(
+  operationId: string,
+  trackKind: ClipTrackKind,
+  length: number,
+): Promise<Blob> {
+  if (!Number.isSafeInteger(length) || length <= 0) {
+    throw new Error(`Invalid selected ${trackKind} part count: ${length}`);
+  }
+  const result = await concatenateChunks(
+    clipTrackNamespace(operationId, trackKind),
+    0,
+    length,
+  );
+  if (result.missingCount > 0) {
+    throw new Error(
+      `Missing ${result.missingCount} required ${trackKind} clip input part(s)`,
+    );
+  }
+  return result.blob;
 }
 
 /**
@@ -530,6 +561,99 @@ async function processM3u8Chunks(
   }
 }
 
+async function processFastSegmentedClip(
+  payload: FastSegmentedClipPayload,
+  signal: AbortSignal,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<ProcessResult> {
+  const operationId = payload.downloadId;
+  validateDownloadId(operationId);
+  if (
+    payload.mediaFormat !== "hls-ts" &&
+    payload.mediaFormat !== "hls-fmp4" &&
+    payload.mediaFormat !== "dash-fmp4"
+  ) {
+    throw new Error(`Unsupported segmented media format: ${payload.mediaFormat}`);
+  }
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const ffmpeg = await getFFmpeg();
+  if (signal.aborted) {
+    resetFFmpeg();
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const outputFile = `/tmp/${operationId}_fast_clip.mp4`;
+  const inputFiles: string[] = [];
+  const abortHandler = () => resetFFmpeg();
+  signal.addEventListener("abort", abortHandler, { once: true });
+
+  try {
+    onProgress?.(0.1, "Loading selected clip parts");
+    let args: string[];
+    const inputExtension = payload.mediaFormat === "hls-ts" ? "ts" : "mp4";
+    if (payload.inputKind === "combined") {
+      const inputFile = `${operationId}_combined_input.${inputExtension}`;
+      inputFiles.push(inputFile);
+      const blob = await concatenateSelectedTrack(
+        operationId,
+        "combined",
+        payload.combinedLength ?? 0,
+      );
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+      await ffmpeg.writeFile(inputFile, await fetchFile(blob));
+      args = buildFastSegmentedClipArgs({
+        input: {
+          kind: "combined",
+          inputFile,
+          relativeStartMs: payload.combinedRelativeStartMs ?? 0,
+        },
+        mediaFormat: payload.mediaFormat,
+        durationMs: payload.durationMs,
+        outputFile,
+      });
+    } else if (payload.inputKind === "separate") {
+      const videoFile = `${operationId}_video_input.${inputExtension}`;
+      const audioFile = `${operationId}_audio_input.${inputExtension}`;
+      inputFiles.push(videoFile, audioFile);
+      const [videoBlob, audioBlob] = await Promise.all([
+        concatenateSelectedTrack(operationId, "video", payload.videoLength ?? 0),
+        concatenateSelectedTrack(operationId, "audio", payload.audioLength ?? 0),
+      ]);
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+      await ffmpeg.writeFile(videoFile, await fetchFile(videoBlob));
+      await ffmpeg.writeFile(audioFile, await fetchFile(audioBlob));
+      args = buildFastSegmentedClipArgs({
+        input: {
+          kind: "separate",
+          videoFile,
+          audioFile,
+          videoRelativeStartMs: payload.videoRelativeStartMs ?? 0,
+          audioRelativeStartMs: payload.audioRelativeStartMs ?? 0,
+        },
+        mediaFormat: payload.mediaFormat,
+        durationMs: payload.durationMs,
+        outputFile,
+      });
+    } else {
+      throw new Error(`Unsupported fast clip input kind: ${payload.inputKind}`);
+    }
+
+    onProgress?.(0.65, "Stream-copying selected clip");
+    await ffmpeg.exec(args);
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const data = await ffmpeg.readFile(outputFile);
+    const blob = new Blob([data as BlobPart], { type: "video/mp4" });
+    onProgress?.(1, "Done");
+    return { blobUrl: URL.createObjectURL(blob) };
+  } catch (error) {
+    resetFFmpeg();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abortHandler);
+    await cleanupFiles(ffmpeg, [...inputFiles, outputFile]);
+  }
+}
+
 /**
  * Send a message to the service worker, swallowing any errors
  * (the service worker might not be listening).
@@ -558,16 +682,22 @@ function handleProcessingMessage(
 ): boolean {
   if (message.type !== requestType) return false;
 
-  const { downloadId } = message.payload;
+  const downloadId = message.payload.downloadId as string;
+  validateDownloadId(downloadId);
+  const controller = new AbortController();
+  mediaJobControllers.get(downloadId)?.abort();
+  mediaJobControllers.set(downloadId, controller);
   sendResponse({ acknowledged: true });
 
   mediaJobQueue.enqueue(() =>
-    processFn(message.payload, (progress, msg) => {
-      sendToServiceWorker({
-        type: responseType,
-        payload: { downloadId, type: "progress", progress, message: msg },
-      });
-    }),
+    runAbortableMediaJob(controller.signal, resetFFmpeg, () =>
+      processFn(message.payload, (progress, msg) => {
+        sendToServiceWorker({
+          type: responseType,
+          payload: { downloadId, type: "progress", progress, message: msg },
+        });
+      }),
+    ),
   )
     .then(({ blobUrl, warning }) => {
       sendToServiceWorker({
@@ -584,6 +714,11 @@ function handleProcessingMessage(
           error: error instanceof Error ? error.message : String(error),
         },
       });
+    })
+    .finally(() => {
+      if (mediaJobControllers.get(downloadId) === controller) {
+        mediaJobControllers.delete(downloadId);
+      }
     });
 
   return true;
@@ -593,6 +728,63 @@ function handleProcessingMessage(
  * Handle messages from service worker
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP) {
+    const payload = message.payload as FastSegmentedClipPayload;
+    validateDownloadId(payload.downloadId);
+    const controller = new AbortController();
+    mediaJobControllers.get(payload.downloadId)?.abort();
+    mediaJobControllers.set(payload.downloadId, controller);
+    sendResponse({ acknowledged: true });
+
+    mediaJobQueue
+      .enqueue(() =>
+        processFastSegmentedClip(payload, controller.signal, (progress, msg) => {
+          sendToServiceWorker({
+            type: MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE,
+            payload: {
+              downloadId: payload.downloadId,
+              type: "progress",
+              progress,
+              message: msg,
+            },
+          });
+        }),
+      )
+      .then(({ blobUrl, warning }) => {
+        sendToServiceWorker({
+          type: MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE,
+          payload: {
+            downloadId: payload.downloadId,
+            type: "success",
+            blobUrl,
+            warning,
+          },
+        });
+      })
+      .catch((error) => {
+        sendToServiceWorker({
+          type: MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE,
+          payload: {
+            downloadId: payload.downloadId,
+            type: "error",
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      })
+      .finally(async () => {
+        await deleteClipOperationChunks(payload.downloadId).catch((error) =>
+          logger.warn(
+            `Failed to clean clip chunks for ${payload.downloadId}:`,
+            error,
+          ),
+        );
+        if (mediaJobControllers.get(payload.downloadId) === controller) {
+          mediaJobControllers.delete(payload.downloadId);
+        }
+      });
+    return true;
+  }
+
   if (message.type === MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP) {
     const { downloadId, url, startMs, endMs, exact } = message.payload as {
       downloadId: string;

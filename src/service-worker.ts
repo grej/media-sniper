@@ -7,7 +7,9 @@ import { DownloadManager } from "./core/downloader/download-manager";
 import { ActiveOperationRegistry } from "./core/downloader/active-operation-registry";
 import { createOperationKey } from "./core/clipping/operation-key";
 import { HlsRecordingHandler } from "./core/downloader/hls/hls-recording-handler";
+import { HlsFastClipHandler } from "./core/downloader/hls/hls-fast-clip-handler";
 import { DashRecordingHandler } from "./core/downloader/dash/dash-recording-handler";
+import { ClipProgressTracker } from "./core/downloader/clip-progress";
 import {
   getAllDownloads,
   getActiveDownloads,
@@ -63,6 +65,7 @@ import {
 import type { ClipDraftLocator, ClipMarkUpdate } from "./core/playback/types";
 import type { ClipRequest } from "./core/clipping/types";
 import { validateClipRange } from "./core/clipping/validation";
+import { deleteClipOperationChunks } from "./core/database/clip-chunks";
 
 interface ActiveRuntimeOperation {
   promise: Promise<void>;
@@ -337,7 +340,25 @@ async function handleGetPlaybackCandidatesMessage(
   }
 }
 
-/** M2 contract endpoint: validate the typed request without transferring media. */
+function notifyClipProgress(state: DownloadState): void {
+  try {
+    chrome.runtime.sendMessage(
+      {
+        type: MessageType.DOWNLOAD_PROGRESS,
+        payload: { id: state.id, progress: state.progress },
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          // The popup is commonly closed while a clip runs.
+        }
+      },
+    );
+  } catch {
+    // The popup/content script may not be listening.
+  }
+}
+
+/** Start a typed, durable, cancellable HLS/M3U8 Fast clip operation. */
 async function handleClipRequestMessage(request: ClipRequest | undefined) {
   try {
     if (!request || typeof request.url !== "string" || !request.url.trim()) {
@@ -348,14 +369,153 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
     }
     const range = validateClipRange(request.clip);
     if (!range.valid) throw range.error;
-    return {
-      success: true,
-      request: {
-        ...request,
-        clip: { ...request.clip, startMs: range.value.startMs, endMs: range.value.endMs },
+    const normalizedRequest: ClipRequest = {
+      ...request,
+      clip: {
+        ...request.clip,
+        startMs: range.value.startMs,
+        endMs: range.value.endMs,
       },
-      plannedOnly: true,
     };
+    if (
+      normalizedRequest.clip.mode !== "fast" ||
+      (normalizedRequest.format !== VideoFormat.HLS &&
+        normalizedRequest.format !== VideoFormat.M3U8)
+    ) {
+      throw new Error("This clipping path is not available yet for the selected source and mode");
+    }
+
+    const operationKey = createOperationKey({
+      url: normalizedRequest.url,
+      kind: "clip",
+      clip: normalizedRequest.clip,
+      quality: normalizedRequest.manifestQuality,
+      outputContainer: normalizedRequest.outputContainer ?? "mp4",
+      pageUrl: normalizedRequest.pageUrl ?? normalizedRequest.metadata.pageUrl,
+    });
+    if (activeOperations.getByOperationKey(operationKey)) {
+      throw new Error("This exact clip is already in progress");
+    }
+
+    const stateId = generateDownloadId(operationKey);
+    const abortController = new AbortController();
+    const runtime: ActiveRuntimeOperation = {
+      promise: Promise.resolve(),
+      abortController,
+      normalizedUrl: normalizeUrl(normalizedRequest.url),
+      kind: "clip",
+      savePartial: false,
+    };
+    if (!activeOperations.register({ id: stateId, operationKey, value: runtime })) {
+      throw new Error("This exact clip is already in progress");
+    }
+
+    try {
+      const settings = await loadSettings();
+      const timestamp = Date.now();
+      const state: DownloadState = {
+        id: stateId,
+        url: normalizedRequest.url,
+        metadata: normalizedRequest.metadata,
+        progress: {
+          url: normalizedRequest.url,
+          stage: DownloadStage.PLANNING,
+          percentage: 0,
+          message: "Planning clip",
+        },
+        operation: {
+          kind: "clip",
+          operationKey,
+          clip: normalizedRequest.clip,
+          requestedDurationMs: range.value.durationMs,
+          qualityKey:
+            normalizedRequest.manifestQuality?.qualityKey ??
+            normalizedRequest.manifestQuality?.representationId ??
+            (normalizedRequest.manifestQuality?.selectedBandwidth !== undefined
+              ? String(normalizedRequest.manifestQuality.selectedBandwidth)
+              : undefined),
+          outputContainer: normalizedRequest.outputContainer ?? "mp4",
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      await storeDownload(state);
+      const tracker = new ClipProgressTracker({
+        state,
+        syncIntervalMs: settings.advanced.dbSyncIntervalMs,
+        notify: notifyClipProgress,
+      });
+      const handler = new HlsFastClipHandler();
+      const promise = (async () => {
+        try {
+          const result = await handler.clip(
+            normalizedRequest,
+            stateId,
+            settings,
+            abortController.signal,
+            (progress) =>
+              tracker.update({
+                stage: progress.stage,
+                percentage: progress.percentage,
+                message: progress.message,
+                downloaded: progress.downloadedBytes,
+              }),
+          );
+          state.localPath = result.filePath;
+          state.operation!.accuracy = result.accuracy;
+          state.operation!.requestedDurationMs = result.requestedDurationMs;
+          state.operation!.actualDurationMs = result.actualDurationMs;
+          tracker.update({
+            stage: DownloadStage.COMPLETED,
+            percentage: 100,
+            message: result.warning || "Clip complete",
+          });
+          await tracker.flush();
+          sendDownloadComplete(stateId);
+          if (!settings.historyEnabled) await deleteDownload(stateId);
+        } catch (error) {
+          if (abortController.signal.aborted || error instanceof CancellationError) {
+            throw new CancellationError();
+          }
+          const detail = error instanceof Error ? error.message : String(error);
+          state.progress.error = detail;
+          state.progress.percentage = undefined;
+          tracker.update({
+            stage: DownloadStage.FAILED,
+            message: "Clip failed",
+          });
+          await tracker.flush();
+          sendDownloadFailed(normalizedRequest.url, detail);
+          if (!settings.historyEnabled) await deleteDownload(stateId);
+          throw error;
+        }
+      })();
+      runtime.promise = promise;
+      updateKeepAlive();
+      createOffscreenDocument()
+        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
+        .catch((error) => logger.error("FFmpeg pre-warm failed:", error));
+      promise
+        .catch((error) => {
+          if (!(error instanceof CancellationError)) {
+            logger.error(`Clip failed for ${normalizedRequest.url}:`, error);
+          }
+        })
+        .finally(() => {
+          activeOperations.removeById(stateId);
+          updateKeepAlive();
+          if (activeOperations.size === 0) {
+            closeOffscreenDocument().catch((error) =>
+              logger.error("Failed to close offscreen document:", error),
+            );
+          }
+        });
+      return { success: true, id: stateId };
+    } catch (error) {
+      activeOperations.removeById(stateId);
+      updateKeepAlive();
+      throw error;
+    }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -653,6 +813,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE:
+      case MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE:
+      case MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE:
         // Handled by ffmpeg-bridge's dynamic onMessage listener in processWithFFmpeg()
         return false;
 
@@ -1257,6 +1419,9 @@ async function handleCancelDownload(id: string): Promise<void> {
   ) {
     try {
       await deleteChunks(download.id);
+      if (download.operation?.kind === "clip") {
+        await deleteClipOperationChunks(download.id);
+      }
       logger.info(`Cleaned up chunks for cancelled download ${download.id}`);
     } catch (error) {
       logger.error(
