@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Media Sniper protected player fixture</title>
+  </head>
+  <body>
+    <h1>Protected redirect player</h1>
+    <img
+      alt="Video preview"
+      src="/__proxied-media/preview_720p.mp4.jpg"
+      width="320"
+      height="180"
+    >
+    <video id="proxied-video" controls muted preload="metadata"></video>
+    <script>
+      document.cookie = 'media_session=e2e; Path=/; SameSite=Lax';
+      const startPlayback = () => {
+        const video = document.querySelector('#proxied-video');
+        video.src = '/__proxied-media/something_720p.mp4?v-acctoken=e2e-secret';
+        video.load();
+      };
+      if (new URLSearchParams(location.search).has('early')) startPlayback();
+      else window.setTimeout(startPlayback, 500);
+    </script>
+  </body>
+</html>

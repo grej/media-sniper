@@ -69,6 +69,11 @@ import type { ClipRequest } from "./core/clipping/types";
 import { validateClipRange } from "./core/clipping/validation";
 import { selectClipHandlerKind } from "./core/clipping/routing";
 import { deleteClipOperationChunks } from "./core/database/clip-chunks";
+import {
+  NetworkMediaRequestTracker,
+  redactSensitiveUrl,
+  type NetworkMediaObservation,
+} from "./core/detection/network-media";
 
 interface ActiveRuntimeOperation {
   promise: Promise<void>;
@@ -81,6 +86,10 @@ interface ActiveRuntimeOperation {
 const activeOperations = new ActiveOperationRegistry<ActiveRuntimeOperation>();
 const activeUploads = new Set<string>();
 const uploadAbortControllers = new Map<string, AbortController>();
+const networkMediaTracker = new NetworkMediaRequestTracker();
+const recentNetworkMedia = new Map<string, NetworkMediaObservation[]>();
+const NETWORK_MEDIA_CANDIDATE_TTL_MS = 60_000;
+const MAX_NETWORK_MEDIA_CANDIDATES_PER_FRAME = 20;
 
 /**
  * Keep-alive heartbeat mechanism to prevent service worker termination
@@ -677,52 +686,184 @@ async function handleFetchResourceMessage(payload: {
 }
 
 /**
- * Set up network interceptor to detect video URLs
- * Intercepts completed network requests and sends valid video URLs to content scripts
- * Using onCompleted ensures the request has finished (better for autoplay scenarios)
+ * Media requests are classified when response bytes start arriving. This
+ * catches progressive video and range-backed proxy endpoints without waiting
+ * for a long-running media request to finish.
  */
-chrome.webRequest.onCompleted.addListener(
-  (details) => {
-    const url = details.url;
-    logger.info(`Network request completed: ${url}`);
-    // Detect if this is a video URL
-    const format = detectFormatFromUrl(url);
-    if (format === VideoFormat.UNKNOWN) {
-      return;
-    }
+const MEDIA_REQUEST_FILTER: chrome.webRequest.RequestFilter = {
+  urls: ["http://*/*", "https://*/*"],
+  types: ["media", "xmlhttprequest", "other"],
+};
 
-    // Send URL to content script in the tab that made the request
-    if (details.tabId && details.tabId > 0) {
-      chrome.tabs.sendMessage(
-        details.tabId,
-        {
-          type: MessageType.NETWORK_URL_DETECTED,
-          payload: { url },
-        },
-        (response) => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - content script might not be available or tab closed
-          }
-        },
-      );
+function networkMediaFrameKey(
+  tabId: number,
+  frameId: number,
+  documentId?: string,
+): string {
+  return `${tabId}:${frameId}:${documentId ?? "frame"}`;
+}
+
+function responseHeadersToRecord(
+  headers?: chrome.webRequest.HttpHeader[],
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const header of headers ?? []) {
+    if (typeof header.value === "string") {
+      result[header.name.toLowerCase()] = header.value;
     }
+  }
+  return result;
+}
+
+function webRequestDocumentId(details: unknown): string | undefined {
+  const documentId = (details as { documentId?: unknown }).documentId;
+  return typeof documentId === "string" ? documentId : undefined;
+}
+
+function pruneRecentNetworkMedia(now = Date.now()): void {
+  for (const [key, candidates] of recentNetworkMedia) {
+    const fresh = candidates.filter(
+      (candidate) => now - candidate.observedAt <= NETWORK_MEDIA_CANDIDATE_TTL_MS,
+    );
+    if (fresh.length > 0) recentNetworkMedia.set(key, fresh);
+    else recentNetworkMedia.delete(key);
+  }
+}
+
+function rememberNetworkMedia(
+  tabId: number,
+  frameId: number,
+  documentId: string | undefined,
+  observation: NetworkMediaObservation,
+): void {
+  pruneRecentNetworkMedia(observation.observedAt);
+  const key = networkMediaFrameKey(tabId, frameId, documentId);
+  const candidates = recentNetworkMedia.get(key) ?? [];
+  const duplicateIndex = candidates.findIndex(
+    (candidate) => candidate.sourceKey === observation.sourceKey,
+  );
+  if (duplicateIndex >= 0) candidates.splice(duplicateIndex, 1);
+  candidates.push(observation);
+  recentNetworkMedia.set(
+    key,
+    candidates.slice(-MAX_NETWORK_MEDIA_CANDIDATES_PER_FRAME),
+  );
+}
+
+function recentNetworkMediaForSender(
+  sender: chrome.runtime.MessageSender,
+): NetworkMediaObservation[] {
+  if (sender.tab?.id === undefined) return [];
+  pruneRecentNetworkMedia();
+  return recentNetworkMedia.get(
+    networkMediaFrameKey(sender.tab.id, sender.frameId ?? 0, sender.documentId),
+  ) ?? [];
+}
+
+chrome.webRequest.onBeforeRequest.addListener((details) => {
+  networkMediaTracker.recordRequest({
+    requestId: details.requestId,
+    url: details.url,
+    tabId: details.tabId,
+    frameId: details.frameId,
+    documentId: webRequestDocumentId(details),
+    resourceType: details.type,
+    initiator: details.initiator,
+    observedAt: Date.now(),
+  });
+}, MEDIA_REQUEST_FILTER);
+
+chrome.webRequest.onBeforeRedirect.addListener(
+  (details) => {
+    networkMediaTracker.recordRedirect({
+      requestId: details.requestId,
+      url: details.url,
+      redirectUrl: details.redirectUrl,
+      statusCode: details.statusCode,
+      tabId: details.tabId,
+      frameId: details.frameId,
+      documentId: webRequestDocumentId(details),
+      resourceType: details.type,
+      initiator: details.initiator,
+      observedAt: Date.now(),
+    });
   },
-  {
-    urls: [
-      "http://*/*.m3u8",
-      "https://*/*.m3u8",
-      "http://*/*.m3u8?*",
-      "https://*/*.m3u8?*",
-      "http://*/*.mpd",
-      "https://*/*.mpd",
-      "http://*/*.mpd?*",
-      "https://*/*.mpd?*",
-    ],
-    types: ["xmlhttprequest"],
-  },
+  MEDIA_REQUEST_FILTER,
   ["responseHeaders"],
 );
+
+chrome.webRequest.onResponseStarted.addListener(
+  (details) => {
+    const observation = networkMediaTracker.observeResponse({
+      requestId: details.requestId,
+      url: details.url,
+      statusCode: details.statusCode,
+      tabId: details.tabId,
+      frameId: details.frameId,
+      documentId: webRequestDocumentId(details),
+      resourceType: details.type,
+      initiator: details.initiator,
+      observedAt: Date.now(),
+      responseHeaders: responseHeadersToRecord(details.responseHeaders),
+    });
+    if (!observation || details.tabId < 0) return;
+
+    rememberNetworkMedia(
+      details.tabId,
+      details.frameId,
+      webRequestDocumentId(details),
+      observation,
+    );
+    logger.debug("Detected media response", {
+      url: redactSensitiveUrl(observation.url),
+      entryUrl: redactSensitiveUrl(observation.entryUrl),
+      statusCode: observation.statusCode,
+      resourceType: observation.resourceType,
+      contentType: observation.contentType,
+    });
+
+    chrome.tabs.sendMessage(
+      details.tabId,
+      {
+        type: MessageType.NETWORK_URL_DETECTED,
+        payload: observation,
+      },
+      webRequestDocumentId(details)
+        ? { documentId: webRequestDocumentId(details) }
+        : { frameId: details.frameId },
+      () => {
+        // A document_idle content script may not be listening yet. The recent
+        // candidate cache above lets it recover the observation after startup.
+        void chrome.runtime.lastError;
+      },
+    );
+  },
+  MEDIA_REQUEST_FILTER,
+  ["responseHeaders"],
+);
+
+chrome.webRequest.onCompleted.addListener(
+  (details) => networkMediaTracker.complete(details.requestId),
+  MEDIA_REQUEST_FILTER,
+);
+
+chrome.webRequest.onErrorOccurred.addListener(
+  (details) => networkMediaTracker.complete(details.requestId),
+  MEDIA_REQUEST_FILTER,
+);
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  const framePrefix = `${details.tabId}:${details.frameId}:`;
+  for (const key of recentNetworkMedia.keys()) {
+    if (key.startsWith(framePrefix)) recentNetworkMedia.delete(key);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  for (const key of recentNetworkMedia.keys()) {
+    if (key.startsWith(`${tabId}:`)) recentNetworkMedia.delete(key);
+  }
+});
 
 /**
  * Handle messages from popup and content scripts
@@ -774,6 +915,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case MessageType.FETCH_RESOURCE:
         handleFetchResourceMessage(message.payload).then(sendResponse);
         return true;
+
+      case MessageType.GET_RECENT_NETWORK_MEDIA:
+        sendResponse({ candidates: recentNetworkMediaForSender(sender) });
+        return false;
 
       case MessageType.VIDEO_DETECTED:
         // This message is sent from content script to popup

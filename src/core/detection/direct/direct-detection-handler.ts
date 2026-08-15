@@ -24,12 +24,26 @@
  */
 
 import { VideoMetadata, VideoFormat } from "../../types";
-import { detectFormatFromUrl } from "../../utils/url-utils";
+import { detectFormatFromUrl, normalizeUrl } from "../../utils/url-utils";
 import { extractThumbnail } from "../thumbnail-utils";
+import {
+  redactSensitiveUrl,
+  type NetworkMediaObservation,
+} from "../network-media";
 
 const DOM_SCAN_DEBOUNCE_MS = 1000;
+const RECENT_NETWORK_CANDIDATE_TTL_MS = 30_000;
+const MAX_RECENT_NETWORK_CANDIDATES = 20;
 const MAX_HEADING_SEARCH_DEPTH = 3;
 const MAX_HEADING_TITLE_LENGTH = 200;
+const MEDIA_LIFECYCLE_EVENTS = [
+  "loadstart",
+  "loadedmetadata",
+  "durationchange",
+  "canplay",
+  "playing",
+  "emptied",
+] as const;
 
 /** Configuration options for DirectDetectionHandler */
 export interface DirectDetectionHandlerOptions {
@@ -47,6 +61,10 @@ export class DirectDetectionHandler {
   private observer: MutationObserver | null = null;
   private scanTimeout: ReturnType<typeof setTimeout> | null = null;
   private knownVideos = new WeakSet<HTMLVideoElement>();
+  private recentNetworkCandidates: NetworkMediaObservation[] = [];
+  private readonly handleMediaLifecycleEvent = (event: Event): void => {
+    if (event.target instanceof HTMLVideoElement) this.scheduleDOMScan();
+  };
 
   /**
    * Create a new DirectDetectionHandler instance
@@ -70,6 +88,10 @@ export class DirectDetectionHandler {
     }
     this.capturedUrls.clear();
     this.knownVideos = new WeakSet();
+    this.recentNetworkCandidates = [];
+    for (const eventName of MEDIA_LIFECYCLE_EVENTS) {
+      document.removeEventListener(eventName, this.handleMediaLifecycleEvent, true);
+    }
   }
 
   /**
@@ -81,15 +103,16 @@ export class DirectDetectionHandler {
   async detect(
     url: string,
     videoElement?: HTMLVideoElement,
+    observation?: NetworkMediaObservation,
   ): Promise<VideoMetadata | null> {
     // Check if URL is a direct video URL
-    if (!this.isDirectVideoUrl(url)) {
+    if (observation?.format !== VideoFormat.DIRECT && !this.isDirectVideoUrl(url)) {
       return null;
     }
 
     // Check if it's audio-only (skip it)
     if (this.isAudioOnlyUrl(url)) {
-      console.log("[Media Sniper] Skipping audio-only URL:", url);
+      console.log("[Media Sniper] Skipping audio-only URL:", redactSensitiveUrl(url));
       return null;
     }
 
@@ -99,7 +122,7 @@ export class DirectDetectionHandler {
     }
 
     // Extract metadata
-    const metadata = await this.extractMetadata(url, videoElement);
+    const metadata = await this.extractMetadata(url, videoElement, observation);
 
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -112,26 +135,16 @@ export class DirectDetectionHandler {
    * Handle network request for direct video
    * Associates URL with video elements and triggers detection
    */
-  handleNetworkRequest(url: string): void {
-    if (this.isDirectVideoUrl(url) && !this.isAudioOnlyUrl(url)) {
-      // Query DOM for current video elements and filter to known ones
-      const videos = document.querySelectorAll("video");
-      for (const node of Array.from(videos)) {
-        const vid = node as HTMLVideoElement;
-        if (!this.knownVideos.has(vid)) continue;
+  handleNetworkRequest(request: string | NetworkMediaObservation): void {
+    const observation = typeof request === "string" ? undefined : request;
+    const url = typeof request === "string" ? request : request.url;
+    if (observation?.format !== VideoFormat.DIRECT && !this.isDirectVideoUrl(url)) return;
+    if (this.isAudioOnlyUrl(url)) return;
 
-        const existing = this.capturedUrls.get(vid);
-
-        if (
-          !existing ||
-          existing.startsWith("blob:") ||
-          existing.startsWith("data:")
-        ) {
-          this.capturedUrls.set(vid, url);
-          this.detect(url, vid);
-        }
-      }
-    }
+    if (observation) this.rememberNetworkCandidate(observation);
+    const video = observation ? this.findVideoForObservation(observation) : this.findSoleVideo();
+    if (video) this.capturedUrls.set(video, url);
+    void this.detect(url, video, observation);
   }
 
   /**
@@ -144,13 +157,15 @@ export class DirectDetectionHandler {
     // First check if we have a captured URL for this video element
     const capturedUrl = this.capturedUrls.get(video);
     if (capturedUrl) {
-      return await this.detect(capturedUrl, video);
+      const candidate = this.recentNetworkCandidates.find(({ url }) => url === capturedUrl);
+      return await this.detect(capturedUrl, video, candidate);
     }
 
     // Try to get URL from video element
     const url = this.getVideoUrl(video);
     if (!url) {
-      return null;
+      const candidate = this.findNetworkCandidateForVideo(video);
+      return candidate ? this.detect(candidate.url, video, candidate) : null;
     }
 
     // If it's a blob URL, we need a captured URL
@@ -160,7 +175,8 @@ export class DirectDetectionHandler {
       if (captured) {
         return await this.detect(captured, video);
       }
-      return null;
+      const candidate = this.findNetworkCandidateForVideo(video);
+      return candidate ? this.detect(candidate.url, video, candidate) : null;
     }
 
     return await this.detect(url, video);
@@ -177,7 +193,7 @@ export class DirectDetectionHandler {
       const vid = video as HTMLVideoElement;
       this.knownVideos.add(vid);
 
-      const hasUrl = vid.currentSrc || vid.src || vid.querySelector("source");
+      const hasUrl = vid.currentSrc || vid.src || vid.querySelector("source") || vid.srcObject;
       if (vid.readyState === 0 && !hasUrl) {
         continue;
       }
@@ -192,13 +208,10 @@ export class DirectDetectionHandler {
     for (const result of results) {
       if (result.status === "fulfilled" && result.value) {
         console.log("[Media Sniper] Detected video:", {
-          url: result.value.url,
+          url: redactSensitiveUrl(result.value.url),
           format: result.value.format,
-          pageUrl: result.value.pageUrl,
+          pageUrl: redactSensitiveUrl(result.value.pageUrl),
         });
-        if (this.onVideoDetected) {
-          this.onVideoDetected(result.value);
-        }
       }
     }
   }
@@ -210,6 +223,14 @@ export class DirectDetectionHandler {
     this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
       for (const mutation of mutations) {
+        if (
+          mutation.type === "attributes" &&
+          (mutation.target instanceof HTMLVideoElement ||
+            mutation.target instanceof HTMLSourceElement)
+        ) {
+          shouldScan = true;
+          break;
+        }
         for (const node of Array.from(mutation.addedNodes)) {
           if (node.nodeType === Node.ELEMENT_NODE) {
             const element = node as Element;
@@ -222,21 +243,89 @@ export class DirectDetectionHandler {
         if (shouldScan) break;
       }
 
-      if (shouldScan) {
-        if (this.scanTimeout) {
-          clearTimeout(this.scanTimeout);
-        }
-        this.scanTimeout = setTimeout(() => {
-          this.scanTimeout = null;
-          this.scanDOMForVideos();
-        }, DOM_SCAN_DEBOUNCE_MS);
-      }
+      if (shouldScan) this.scheduleDOMScan();
     });
 
-    this.observer.observe(document.body, {
+    this.observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
     });
+    for (const eventName of MEDIA_LIFECYCLE_EVENTS) {
+      document.addEventListener(eventName, this.handleMediaLifecycleEvent, true);
+    }
+  }
+
+  private scheduleDOMScan(): void {
+    if (this.scanTimeout) clearTimeout(this.scanTimeout);
+    this.scanTimeout = setTimeout(() => {
+      this.scanTimeout = null;
+      void this.scanDOMForVideos();
+    }, DOM_SCAN_DEBOUNCE_MS);
+  }
+
+  private rememberNetworkCandidate(candidate: NetworkMediaObservation): void {
+    const cutoff = Date.now() - RECENT_NETWORK_CANDIDATE_TTL_MS;
+    this.recentNetworkCandidates = this.recentNetworkCandidates
+      .filter(({ observedAt, sourceKey }) => observedAt >= cutoff && sourceKey !== candidate.sourceKey);
+    this.recentNetworkCandidates.push(candidate);
+    if (this.recentNetworkCandidates.length > MAX_RECENT_NETWORK_CANDIDATES) {
+      this.recentNetworkCandidates.splice(
+        0,
+        this.recentNetworkCandidates.length - MAX_RECENT_NETWORK_CANDIDATES,
+      );
+    }
+  }
+
+  private videoSourceUrls(video: HTMLVideoElement): string[] {
+    return [
+      video.currentSrc,
+      video.src,
+      ...[...video.querySelectorAll<HTMLSourceElement>("source")].map((source) => source.src),
+    ].filter(Boolean);
+  }
+
+  private candidateMatchesVideo(
+    candidate: NetworkMediaObservation,
+    video: HTMLVideoElement,
+  ): boolean {
+    const aliases = new Set(candidate.redirectChain.map(normalizeUrl));
+    return this.videoSourceUrls(video).some((url) => aliases.has(normalizeUrl(url)));
+  }
+
+  private findVideoForObservation(
+    candidate: NetworkMediaObservation,
+  ): HTMLVideoElement | undefined {
+    const videos = [...document.querySelectorAll<HTMLVideoElement>("video")];
+    videos.forEach((video) => this.knownVideos.add(video));
+    const exact = videos.filter((video) => this.candidateMatchesVideo(candidate, video));
+    if (exact.length === 1) return exact[0];
+    return this.findSoleVideo(videos);
+  }
+
+  private findSoleVideo(
+    videos = [...document.querySelectorAll<HTMLVideoElement>("video")],
+  ): HTMLVideoElement | undefined {
+    const active = videos.filter((video) => !video.paused && !video.ended);
+    if (active.length === 1) return active[0];
+    if (videos.length === 1) return videos[0];
+    return undefined;
+  }
+
+  private findNetworkCandidateForVideo(
+    video: HTMLVideoElement,
+  ): NetworkMediaObservation | undefined {
+    const cutoff = Date.now() - RECENT_NETWORK_CANDIDATE_TTL_MS;
+    this.recentNetworkCandidates = this.recentNetworkCandidates
+      .filter(({ observedAt }) => observedAt >= cutoff);
+    const exact = this.recentNetworkCandidates
+      .filter((candidate) => this.candidateMatchesVideo(candidate, video));
+    if (exact.length === 1) return exact[0];
+    if (document.querySelectorAll("video").length !== 1) return undefined;
+    return this.recentNetworkCandidates.length === 1
+      ? this.recentNetworkCandidates[0]
+      : undefined;
   }
 
   /**
@@ -283,16 +372,7 @@ export class DirectDetectionHandler {
    * @private
    */
   private isDirectVideoUrl(url: string): boolean {
-    return (
-      url.includes(".mp4") ||
-      url.includes(".webm") ||
-      url.includes(".mov") ||
-      url.includes(".avi") ||
-      url.includes(".mkv") ||
-      url.includes(".flv") ||
-      url.includes(".wmv") ||
-      url.includes(".ogg")
-    );
+    return detectFormatFromUrl(url) === VideoFormat.DIRECT;
   }
 
   /**
@@ -335,8 +415,9 @@ export class DirectDetectionHandler {
   private async extractMetadata(
     url: string,
     videoElement?: HTMLVideoElement,
+    observation?: NetworkMediaObservation,
   ): Promise<VideoMetadata | null> {
-    const format = detectFormatFromUrl(url);
+    const format = observation?.format ?? detectFormatFromUrl(url);
 
     // Reject unknown formats
     if (format === VideoFormat.UNKNOWN) {
@@ -348,6 +429,11 @@ export class DirectDetectionHandler {
       format,
       pageUrl: window.location.href,
       title: document.title,
+      sourceKey: observation?.sourceKey,
+      sourceUrl: observation?.entryUrl,
+      redirectChain: observation?.redirectChain,
+      observedAt: observation?.observedAt,
+      contentType: observation?.contentType,
     };
 
     // Extract metadata from video element if available

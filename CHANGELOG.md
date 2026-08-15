@@ -10,6 +10,7 @@
 
 ### Reliability and Safety
 
+- Detect tokenized progressive video and `206 Partial Content` media proxies across redirect chains, including sources assigned after page load.
 - Limit direct media reads with bounded byte ranges and explicit consent for small sources whose servers ignore Range.
 - Fetch only selected segmented-media windows, retain authentication headers through temporary DNR rules, and clean temporary rules/chunks on terminal paths.
 - Refuse DRM, unsupported live/timeline layouts, unsafe memory sizes, and unsupported browser codecs with stable user-facing errors.

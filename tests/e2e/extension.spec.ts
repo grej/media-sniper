@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 const FIXTURE_PATH = "/tests/e2e/fixtures/player.html";
+const PROXIED_FIXTURE_PATH = "/tests/e2e/fixtures/proxied-player.html";
 const EXTENSION_NAME = "Media Sniper";
 
 interface ExtensionHarness {
@@ -37,14 +38,29 @@ async function activateFixtureTab(): Promise<void> {
 }
 
 async function detectedVideoCount(): Promise<number> {
-  return harness.serviceWorker.evaluate(async (tabId) => {
+  return detectedVideoCountForTab(harness.fixtureTabId);
+}
+
+async function detectedVideoCountForTab(tabId: number): Promise<number> {
+  return harness.serviceWorker.evaluate(async (targetTabId) => {
     return new Promise<number>((resolveCount) => {
-      chrome.tabs.sendMessage(tabId, { type: "GET_DETECTED_VIDEOS" }, (response) => {
+      chrome.tabs.sendMessage(targetTabId, { type: "GET_DETECTED_VIDEOS" }, (response) => {
         if (chrome.runtime.lastError) return resolveCount(0);
         resolveCount(Array.isArray(response?.videos) ? response.videos.length : 0);
       });
     });
-  }, harness.fixtureTabId);
+  }, tabId);
+}
+
+async function detectedVideosForTab(tabId: number): Promise<Array<Record<string, unknown>>> {
+  return harness.serviceWorker.evaluate(async (targetTabId) => {
+    return new Promise<Array<Record<string, unknown>>>((resolveVideos) => {
+      chrome.tabs.sendMessage(targetTabId, { type: "GET_DETECTED_VIDEOS" }, (response) => {
+        if (chrome.runtime.lastError) return resolveVideos([]);
+        resolveVideos(Array.isArray(response?.videos) ? response.videos : []);
+      });
+    });
+  }, tabId);
 }
 
 async function openPopupPage(): Promise<Page> {
@@ -119,6 +135,53 @@ test("starts as the unpacked Media Sniper MV3 extension", async () => {
     name: EXTENSION_NAME,
     version: "1.12.0",
   });
+});
+
+test("detects a delayed tokenized MP4 through a 302 to a PHP 206 proxy", async ({ baseURL }) => {
+  const page = await harness.context.newPage();
+  const loggedMessages: string[] = [];
+  const capturePageLog = (message: { text(): string }) => loggedMessages.push(message.text());
+  const captureWorkerLog = (message: { text(): string }) => loggedMessages.push(message.text());
+  page.on("console", capturePageLog);
+  harness.serviceWorker.on("console", captureWorkerLog);
+  const fixtureUrl = new URL(PROXIED_FIXTURE_PATH, baseURL).href;
+  await page.goto(fixtureUrl);
+  const tabId = await queryFixtureTabId(harness.serviceWorker, fixtureUrl);
+
+  await expect.poll(() => detectedVideoCountForTab(tabId)).toBeGreaterThan(0);
+  const videos = await detectedVideosForTab(tabId);
+  expect(videos).toHaveLength(1);
+  expect(videos[0]).toMatchObject({
+    format: "direct",
+    contentType: "video/mp4",
+    sourceUrl: expect.stringContaining("something_720p.mp4?v-acctoken="),
+    url: expect.stringContaining("remote_control.php?file="),
+  });
+  expect(videos[0].redirectChain).toEqual([
+    expect.stringContaining("something_720p.mp4?v-acctoken="),
+    expect.stringContaining("remote_control.php?file="),
+  ]);
+  expect(videos.every((video) => !String(video.url).includes(".mp4.jpg"))).toBe(true);
+  expect(loggedMessages.join("\n")).not.toContain("e2e-secret");
+  page.off("console", capturePageLog);
+  harness.serviceWorker.off("console", captureWorkerLog);
+  await page.close();
+});
+
+test("recovers protected media requested before document_idle", async ({ baseURL }) => {
+  const page = await harness.context.newPage();
+  const fixtureUrl = new URL(`${PROXIED_FIXTURE_PATH}?early=1`, baseURL).href;
+  await page.goto(fixtureUrl);
+  const tabId = await queryFixtureTabId(harness.serviceWorker, fixtureUrl);
+
+  await expect.poll(() => detectedVideoCountForTab(tabId)).toBeGreaterThan(0);
+  const videos = await detectedVideosForTab(tabId);
+  expect(videos).toHaveLength(1);
+  expect(videos[0]).toMatchObject({
+    contentType: "video/mp4",
+    url: expect.stringContaining("remote_control.php?file="),
+  });
+  await page.close();
 });
 
 test("defaults clip timestamps to clock format and toggles to seconds", async () => {

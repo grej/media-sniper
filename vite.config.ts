@@ -73,6 +73,62 @@ export default defineConfig(({ mode }) => {
       {
         name: 'test-fixture-byte-ranges',
         configureServer(server) {
+          server.middlewares.use('/__proxied-media', (request, response, next) => {
+            const requestUrl = new URL(request.url ?? '/', 'http://fixture');
+            const authenticated = request.headers.cookie?.includes('media_session=e2e') &&
+              request.headers.referer?.includes('/tests/e2e/fixtures/proxied-player.html');
+            if (requestUrl.pathname === '/something_720p.mp4') {
+              if (!authenticated || requestUrl.searchParams.get('v-acctoken') !== 'e2e-secret') {
+                response.statusCode = 403;
+                response.setHeader('Content-Type', 'text/html');
+                return void response.end('<h1>Forbidden</h1>');
+              }
+              const file = encodeURIComponent('protected/video_720p.mp4?v-acctoken=e2e-secret');
+              response.statusCode = 302;
+              response.setHeader(
+                'Location',
+                `/__proxied-media/remote_control.php?file=${file}&rnd=123456`,
+              );
+              return void response.end();
+            }
+            if (requestUrl.pathname === '/preview_720p.mp4.jpg') {
+              response.statusCode = 200;
+              response.setHeader('Content-Type', 'image/jpeg');
+              response.setHeader('Content-Length', '4');
+              return void response.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+            }
+            if (requestUrl.pathname !== '/remote_control.php') return next();
+            if (
+              !authenticated ||
+              requestUrl.searchParams.get('file') !==
+                'protected/video_720p.mp4?v-acctoken=e2e-secret' ||
+              requestUrl.searchParams.get('rnd') !== '123456'
+            ) {
+              response.statusCode = 403;
+              response.setHeader('Content-Type', 'application/json');
+              return void response.end('{"error":"invalid capability"}');
+            }
+
+            const fixturePath = resolve(__dirname, 'tests/fixtures/direct-faststart.mp4');
+            const bytes = readFileSync(fixturePath);
+            const match = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
+            const start = match ? Number(match[1]) : 0;
+            const requestedEnd = match?.[2] ? Number(match[2]) : bytes.length - 1;
+            const end = Math.min(requestedEnd, bytes.length - 1);
+            if (!Number.isSafeInteger(start) || start < 0 || start > end) {
+              response.statusCode = 416;
+              response.setHeader('Content-Range', `bytes */${bytes.length}`);
+              return void response.end();
+            }
+            const part = bytes.subarray(start, end + 1);
+            response.statusCode = 206;
+            response.setHeader('Accept-Ranges', 'bytes');
+            response.setHeader('Content-Type', 'video/mp4');
+            response.setHeader('Content-Length', part.length);
+            response.setHeader('Content-Range', `bytes ${start}-${end}/${bytes.length}`);
+            return void response.end(part);
+          });
+
           server.middlewares.use('/__range-fixtures', (request, response, next) => {
             const filename = basename(new URL(request.url ?? '/', 'http://fixture').pathname);
             const fixturePath = resolve(__dirname, 'tests/fixtures', filename);
