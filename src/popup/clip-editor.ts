@@ -33,6 +33,7 @@ export interface ClipEditorSubmit {
   clip: ClipSpec;
   qualityKey?: string;
   manifestQuality?: ManifestQualitySelection;
+  allowFullFetchForDirect?: boolean;
 }
 
 export interface ClipEditorOptions {
@@ -40,6 +41,7 @@ export interface ClipEditorOptions {
   durationMs?: number;
   draft?: ClipEditorDraft;
   qualities?: ClipEditorQualityOption[];
+  showDirectFullFetchConsent?: boolean;
   getPlayback?: (preferredPageVideoId?: string) => Promise<ClipEditorPlayback | null>;
   persistDraft?: (draft: ClipEditorDraft) => void | Promise<void>;
   onSubmit: (value: ClipEditorSubmit) => void | Promise<void>;
@@ -211,6 +213,19 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
     optionsRow.append(qualityLabel);
   }
 
+  let fullFetchConsent: HTMLInputElement | undefined;
+  if (options.showDirectFullFetchConsent) {
+    const consentLabel = document.createElement("label");
+    consentLabel.className = "clip-full-fetch-consent";
+    fullFetchConsent = document.createElement("input");
+    fullFetchConsent.type = "checkbox";
+    consentLabel.append(
+      fullFetchConsent,
+      document.createTextNode(" Allow a full source fetch only if Range is unavailable and the source is below the configured safety limit"),
+    );
+    optionsRow.append(consentLabel);
+  }
+
   const capability = document.createElement("div");
   capability.className = "clip-capability";
   capability.textContent = "Exact support is checked after the source is planned.";
@@ -369,6 +384,7 @@ export function createClipEditor(options: ClipEditorOptions): ClipEditorControll
         },
         qualityKey: quality?.value,
         manifestQuality: qualityOption?.selection,
+        allowFullFetchForDirect: fullFetchConsent?.checked || undefined,
       });
       await persist();
     } catch (cause) {

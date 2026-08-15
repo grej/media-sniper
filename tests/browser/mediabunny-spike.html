@@ -7,14 +7,19 @@
   <body>
     <button id="fast" type="button">Run fast Blob trim</button>
     <button id="exact" type="button">Run exact Blob trim</button>
+    <button id="webm-fast" type="button">Run fast WebM trim</button>
+    <button id="webm-exact" type="button">Run exact WebM trim</button>
     <button id="range" type="button">Run URL range trim</button>
     <button id="cancel" type="button">Run cancellation</button>
     <output id="result">idle</output>
     <video id="preview" controls></video>
     <script type="module">
       import { processMediabunnyClip } from "/src/core/media/mediabunny-clip-processor.ts";
+      import { createBoundedRangeFetch } from "/src/core/media/bounded-range-fetch.ts";
 
       const fixtureUrl = "/tests/fixtures/direct-faststart.mp4";
+      const rangeFixtureUrl = "/__range-fixtures/direct-faststart.mp4";
+      const webmFixtureUrl = "/tests/fixtures/direct-source.webm";
       const result = document.querySelector("#result");
       const preview = document.querySelector("#preview");
 
@@ -35,6 +40,7 @@
           exact,
           size: converted.blob.size,
           accuracy: converted.accuracy,
+          actualDurationMs: converted.actualDurationMs,
           progressEvents: progress.length,
         });
         return converted;
@@ -62,21 +68,36 @@
         }
       });
 
+      for (const [buttonId, exact] of [["webm-fast", false], ["webm-exact", true]]) {
+        document.querySelector(`#${buttonId}`).addEventListener("click", async () => {
+          try {
+            await run(
+              { kind: "blob", blob: await (await fetch(webmFixtureUrl)).blob() },
+              exact,
+            );
+          } catch (error) {
+            result.value = `${error.name}: ${error.message}`;
+          }
+        });
+      }
+
       document.querySelector("#range").addEventListener("click", async () => {
         try {
           const ranges = [];
           const converted = await run(
             {
               kind: "url",
-              url: fixtureUrl,
-              fetchFn: async (input, init) => {
+              url: rangeFixtureUrl,
+              maxCacheSize: 64 * 1024,
+              parallelism: 2,
+              fetchFn: createBoundedRangeFetch(async (input, init) => {
                 const request = new Request(input, init);
                 ranges.push(request.headers.get("range"));
                 const response = await fetch(request);
                 response.headers.get("content-range");
                 window.__mediabunnyRanges = ranges;
                 return response;
-              },
+              }),
             },
             false,
           );

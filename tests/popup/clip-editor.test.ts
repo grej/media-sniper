@@ -30,6 +30,7 @@ describe("clip editor", () => {
       clip: { startMs: 62_125, endMs: 65_500, mode: "fast", markSource: "manual" },
       qualityKey: undefined,
       manifestQuality: undefined,
+      allowFullFetchForDirect: undefined,
     });
     controller.destroy();
   });
@@ -119,6 +120,21 @@ describe("clip editor", () => {
     display.dispatchEvent(new Event("change", { bubbles: true }));
     expect([...controller.element.querySelectorAll<HTMLInputElement>(".clip-time-input")]
       .map((input) => input.value)).toEqual(["00:01:02.125", "00:01:05.500"]);
+    controller.destroy();
+  });
+
+  it("emits explicit direct full-fetch consent only when checked", async () => {
+    const onSubmit = vi.fn();
+    const controller = createClipEditor({
+      sourceKey: "direct",
+      showDirectFullFetchConsent: true,
+      onSubmit,
+    });
+    document.body.append(controller.element);
+    controller.element.querySelector<HTMLInputElement>(".clip-full-fetch-consent input")!.checked = true;
+    controller.element.querySelector<HTMLButtonElement>(".clip-submit-btn")!.click();
+    await Promise.resolve();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ allowFullFetchForDirect: true }));
     controller.destroy();
   });
 });

@@ -41,6 +41,7 @@ export interface MediabunnyClipResult {
   blob: Blob;
   discardedTracks: DiscardedTrack[];
   accuracy: "keyframe-aligned" | "exact";
+  actualDurationMs?: number;
 }
 
 export class MediabunnyCapabilityError extends Error {
@@ -166,10 +167,26 @@ export async function processMediabunnyClip(
       throw new Error("Mediabunny completed without producing an output buffer");
     }
 
+    const blob = new Blob([target.buffer], { type: "video/mp4" });
+    const outputInput = new Input({
+      formats: [MP4],
+      source: new BlobSource(blob),
+    });
+    let actualDurationMs: number | undefined;
+    try {
+      const duration = await outputInput.getDurationFromMetadata();
+      if (duration !== null && Number.isFinite(duration)) {
+        actualDurationMs = Math.round(duration * 1_000);
+      }
+    } finally {
+      outputInput.dispose();
+    }
+
     return {
-      blob: new Blob([target.buffer], { type: "video/mp4" }),
+      blob,
       discardedTracks: conversion.discardedTracks,
       accuracy: exact ? "exact" : "keyframe-aligned",
+      actualDurationMs,
     };
   } catch (error) {
     if (signal?.aborted) throw abortError();

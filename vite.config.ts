@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { renameSync, existsSync, readFileSync, writeFileSync } from 'fs';
@@ -70,6 +70,37 @@ export default defineConfig(({ mode }) => {
       extensions: ['.ts', '.tsx', '.js'],
     },
     plugins: [
+      {
+        name: 'test-fixture-byte-ranges',
+        configureServer(server) {
+          server.middlewares.use('/__range-fixtures', (request, response, next) => {
+            const filename = basename(new URL(request.url ?? '/', 'http://fixture').pathname);
+            const fixturePath = resolve(__dirname, 'tests/fixtures', filename);
+            if (!existsSync(fixturePath)) return next();
+            const bytes = readFileSync(fixturePath);
+            response.setHeader('Accept-Ranges', 'bytes');
+            response.setHeader('Content-Type', filename.endsWith('.webm') ? 'video/webm' : 'video/mp4');
+            const match = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
+            if (!match) {
+              response.setHeader('Content-Length', bytes.length);
+              return void response.end(bytes);
+            }
+            const start = Number(match[1]);
+            const requestedEnd = match[2] ? Number(match[2]) : bytes.length - 1;
+            const end = Math.min(requestedEnd, bytes.length - 1);
+            if (!Number.isSafeInteger(start) || start < 0 || start > end) {
+              response.statusCode = 416;
+              response.setHeader('Content-Range', `bytes */${bytes.length}`);
+              return void response.end();
+            }
+            const part = bytes.subarray(start, end + 1);
+            response.statusCode = 206;
+            response.setHeader('Content-Length', part.length);
+            response.setHeader('Content-Range', `bytes ${start}-${end}/${bytes.length}`);
+            return void response.end(part);
+          });
+        },
+      },
       viteStaticCopy({
         targets: [
           {
@@ -176,4 +207,3 @@ export default defineConfig(({ mode }) => {
     },
   };
 });
-

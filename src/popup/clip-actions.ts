@@ -130,6 +130,7 @@ function buildRequest(
     pageVideoId: video.pageVideoId,
     frameId: video.frameId,
     manifestQuality: value.manifestQuality,
+    allowFullFetchForDirect: value.allowFullFetchForDirect,
     outputContainer: "mp4",
   };
 }
@@ -157,6 +158,7 @@ async function mountEditor(
     durationMs: video.duration ? Math.round(video.duration * 1_000) : undefined,
     draft: toEditorDraft(draft),
     qualities,
+    showDirectFullFetchConsent: video.format === VideoFormat.DIRECT,
     getPlayback: playbackProvider(context, video),
     persistDraft: (value) => persistDraft(locator, value, qualities),
     onSubmit: async (value) => {
