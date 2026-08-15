@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mediabunny clipping spike</title>
+  </head>
+  <body>
+    <button id="fast" type="button">Run fast Blob trim</button>
+    <button id="exact" type="button">Run exact Blob trim</button>
+    <button id="range" type="button">Run URL range trim</button>
+    <button id="cancel" type="button">Run cancellation</button>
+    <output id="result">idle</output>
+    <video id="preview" controls></video>
+    <script type="module">
+      import { processMediabunnyClip } from "/src/core/media/mediabunny-clip-processor.ts";
+
+      const fixtureUrl = "/tests/fixtures/direct-faststart.mp4";
+      const result = document.querySelector("#result");
+      const preview = document.querySelector("#preview");
+
+      async function run(input, exact, signal) {
+        result.value = "running";
+        const progress = [];
+        const converted = await processMediabunnyClip({
+          input,
+          startMs: 2_000,
+          endMs: 6_000,
+          exact,
+          signal,
+          onProgress: (value) => progress.push(value),
+        });
+        preview.src = URL.createObjectURL(converted.blob);
+        result.value = JSON.stringify({
+          ok: true,
+          exact,
+          size: converted.blob.size,
+          accuracy: converted.accuracy,
+          progressEvents: progress.length,
+        });
+        return converted;
+      }
+
+      document.querySelector("#fast").addEventListener("click", async () => {
+        try {
+          await run(
+            { kind: "blob", blob: await (await fetch(fixtureUrl)).blob() },
+            false,
+          );
+        } catch (error) {
+          result.value = `${error.name}: ${error.message}`;
+        }
+      });
+
+      document.querySelector("#exact").addEventListener("click", async () => {
+        try {
+          await run(
+            { kind: "blob", blob: await (await fetch(fixtureUrl)).blob() },
+            true,
+          );
+        } catch (error) {
+          result.value = `${error.name}: ${error.message}`;
+        }
+      });
+
+      document.querySelector("#range").addEventListener("click", async () => {
+        try {
+          const ranges = [];
+          const converted = await run(
+            {
+              kind: "url",
+              url: fixtureUrl,
+              fetchFn: async (input, init) => {
+                const request = new Request(input, init);
+                ranges.push(request.headers.get("range"));
+                const response = await fetch(request);
+                response.headers.get("content-range");
+                window.__mediabunnyRanges = ranges;
+                return response;
+              },
+            },
+            false,
+          );
+          result.value = JSON.stringify({
+            ok: true,
+            size: converted.blob.size,
+            ranges,
+          });
+        } catch (error) {
+          result.value = `${error.name}: ${error.message}`;
+        }
+      });
+
+      document.querySelector("#cancel").addEventListener("click", async () => {
+        const controller = new AbortController();
+        controller.abort();
+        try {
+          await run(
+            { kind: "blob", blob: await (await fetch(fixtureUrl)).blob() },
+            true,
+            controller.signal,
+          );
+        } catch (error) {
+          result.value = `${error.name}: ${error.message}`;
+        }
+      });
+    </script>
+  </body>
+</html>
