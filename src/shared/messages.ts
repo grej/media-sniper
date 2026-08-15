@@ -3,6 +3,13 @@
  */
 
 import { VideoMetadata, DownloadStage } from "../core/types";
+import type {
+  ClipDraft,
+  ClipDraftLocator,
+  ClipMarkUpdate,
+  PlaybackCandidate,
+} from "../core/playback/types";
+import type { ClipRequest } from "../core/clipping/types";
 
 export type CloudProvider = 'googleDrive' | 's3';
 
@@ -13,6 +20,7 @@ export enum MessageType {
   DOWNLOAD_COMPLETE = "DOWNLOAD_COMPLETE",
   DOWNLOAD_FAILED = "DOWNLOAD_FAILED",
   CANCEL_DOWNLOAD = "CANCEL_DOWNLOAD",
+  CLIP_REQUEST = "CLIP_REQUEST",
 
   // State messages
   GET_DOWNLOADS = "GET_DOWNLOADS",
@@ -25,6 +33,12 @@ export enum MessageType {
   START_DOWNLOAD = "START_DOWNLOAD",
   EXTRACT_VIDEO_URL = "EXTRACT_VIDEO_URL",
   NETWORK_URL_DETECTED = "NETWORK_URL_DETECTED",
+
+  // Page playback and clip drafts
+  GET_PLAYBACK_CANDIDATES = "GET_PLAYBACK_CANDIDATES",
+  GET_CLIP_DRAFT = "GET_CLIP_DRAFT",
+  SET_CLIP_MARK = "SET_CLIP_MARK",
+  CLEAR_CLIP_DRAFT = "CLEAR_CLIP_DRAFT",
 
   // Cloud upload
   UPLOAD_REQUEST = "UPLOAD_REQUEST",
@@ -107,7 +121,52 @@ export interface DownloadProgressMessage extends BaseMessage {
   };
 }
 
+export interface ClipRequestMessage extends BaseMessage {
+  type: MessageType.CLIP_REQUEST;
+  payload: ClipRequest;
+}
+
+export interface GetPlaybackCandidatesMessage extends BaseMessage {
+  type: MessageType.GET_PLAYBACK_CANDIDATES;
+  payload?: {
+    tabId?: number;
+    pageVideoId?: string;
+  };
+}
+
+export interface PlaybackCandidatesMessageResponse {
+  success: boolean;
+  candidates: PlaybackCandidate[];
+  error?: string;
+}
+
+export interface GetClipDraftMessage extends BaseMessage {
+  type: MessageType.GET_CLIP_DRAFT;
+  payload: { locator: ClipDraftLocator };
+}
+
+export interface SetClipMarkMessage extends BaseMessage {
+  type: MessageType.SET_CLIP_MARK;
+  payload: ClipMarkUpdate;
+}
+
+export interface ClearClipDraftMessage extends BaseMessage {
+  type: MessageType.CLEAR_CLIP_DRAFT;
+  payload: { locator: ClipDraftLocator };
+}
+
+export interface ClipDraftMessageResponse {
+  success: boolean;
+  draft: ClipDraft | null;
+  error?: string;
+}
+
 export type ExtensionMessage =
   | DownloadRequestMessage
   | DownloadProgressMessage
+  | ClipRequestMessage
+  | GetPlaybackCandidatesMessage
+  | GetClipDraftMessage
+  | SetClipMarkMessage
+  | ClearClipDraftMessage
   | BaseMessage;

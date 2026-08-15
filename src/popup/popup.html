@@ -849,6 +849,74 @@
       width: 100%;
     }
 
+    /* ---- Clip editor ---- */
+    .video-btn-clip {
+      padding: 4px 10px;
+      border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+      color: var(--accent);
+      font: 600 11px inherit;
+      cursor: pointer;
+    }
+
+    .clip-editor {
+      display: grid;
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+      padding: var(--space-3);
+      border: 1px solid var(--border-hover);
+      border-radius: var(--radius-md);
+      background: var(--surface-2);
+    }
+
+    .clip-editor-header,
+    .clip-editor-footer,
+    .clip-nudges {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .clip-editor-header strong { margin-right: auto; }
+    .clip-current-time { color: var(--text-secondary); font-size: 11px; }
+    .clip-close-btn { border: 0; background: transparent; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
+    .clip-time-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+    .clip-time-control { display: grid; grid-template-columns: 1fr auto; gap: 5px; }
+    .clip-time-control label { grid-column: 1 / -1; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+    .clip-time-input,
+    .clip-mode-select,
+    .clip-quality-select,
+    .clip-player-select {
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid var(--border-hover);
+      border-radius: var(--radius-sm);
+      background: var(--surface-1);
+      color: var(--text-primary);
+      font: 12px inherit;
+    }
+
+    .clip-mark-btn,
+    .clip-nudge-btn {
+      padding: 5px 7px;
+      border: 1px solid var(--border-hover);
+      border-radius: var(--radius-sm);
+      background: var(--surface-3);
+      color: var(--text-secondary);
+      font: 11px inherit;
+      cursor: pointer;
+    }
+
+    .clip-nudges { justify-content: center; }
+    .clip-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+    .clip-options label { display: grid; gap: 4px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+    .clip-capability { color: var(--text-tertiary); font-size: 10px; }
+    .clip-error { min-height: 14px; color: var(--recording); font-size: 11px; }
+    .clip-editor-footer { justify-content: flex-end; }
+    .clip-submit-btn { width: 100%; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
   </style>
 </head>
 <body>
@@ -914,7 +982,7 @@
   <div id="manifestContent" class="tab-content">
     <div class="manifest-form-area">
       <div class="manifest-input-group">
-        <input type="text" id="manifestUrlInput" placeholder="Enter manifest URL (.m3u8 or .mpd)">
+        <input type="text" id="manifestUrlInput" placeholder="Enter media URL (.mp4, .webm, .m3u8, or .mpd)">
         <button id="loadHlsPlaylistBtn" class="primary-btn">Load</button>
       </div>
       <div id="hlsMediaPlaylistWarning" class="warning-card" style="display: none;">
@@ -948,6 +1016,7 @@
         </div>
       </div>
       <div id="manifestProgress" style="display: none; padding: 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); margin-top: var(--space-5);"></div>
+      <div id="manifestClipEditor"></div>
     </div>
     <div class="manifest-download-footer">
       <button id="startHlsDownloadBtn" class="primary-btn" disabled>Download</button>

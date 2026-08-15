@@ -53,6 +53,16 @@ import {
   KEEPALIVE_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
 } from "./shared/constants";
+import { collectPlaybackCandidates } from "./core/playback/frame-collector";
+import {
+  cleanupExpiredClipDrafts,
+  clearClipDraft,
+  getClipDraft,
+  setClipMark,
+} from "./core/playback/clip-draft-store";
+import type { ClipDraftLocator, ClipMarkUpdate } from "./core/playback/types";
+import type { ClipRequest } from "./core/clipping/types";
+import { validateClipRange } from "./core/clipping/validation";
 
 interface ActiveRuntimeOperation {
   promise: Promise<void>;
@@ -126,6 +136,10 @@ async function init() {
   // Restore downloads stuck in UPLOADING stage after a crash
   cleanupStaleUploads().catch((err) =>
     logger.error("Stale upload cleanup failed:", err),
+  );
+
+  cleanupExpiredClipDrafts().catch((err) =>
+    logger.error("Clip draft cleanup failed:", err),
   );
 }
 
@@ -295,6 +309,97 @@ async function handleGetConfigMessage(): Promise<{
   }
 }
 
+async function handleGetPlaybackCandidatesMessage(
+  payload: { tabId?: number; pageVideoId?: string } | undefined,
+  sender: chrome.runtime.MessageSender,
+) {
+  try {
+    const tabId = payload?.tabId ?? sender.tab?.id;
+    if (!Number.isInteger(tabId) || (tabId ?? -1) < 0) {
+      throw new Error("A valid tabId is required to inspect page playback");
+    }
+    const candidates = await collectPlaybackCandidates(tabId!, {
+      getAllFrames: async (targetTabId) => {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: targetTabId });
+        return frames?.map((frame) => ({ frameId: frame.frameId, url: frame.url })) ?? null;
+      },
+      sendMessage: (targetTabId, frameId, message) =>
+        chrome.tabs.sendMessage(targetTabId, message, { frameId }),
+    });
+    return { success: true, candidates };
+  } catch (error) {
+    logger.error("Get playback candidates error:", error);
+    return {
+      success: false,
+      candidates: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/** M2 contract endpoint: validate the typed request without transferring media. */
+async function handleClipRequestMessage(request: ClipRequest | undefined) {
+  try {
+    if (!request || typeof request.url !== "string" || !request.url.trim()) {
+      throw new Error("A media URL is required");
+    }
+    if (!Object.values(VideoFormat).includes(request.format)) {
+      throw new Error("A supported media format is required");
+    }
+    const range = validateClipRange(request.clip);
+    if (!range.valid) throw range.error;
+    return {
+      success: true,
+      request: {
+        ...request,
+        clip: { ...request.clip, startMs: range.value.startMs, endMs: range.value.endMs },
+      },
+      plannedOnly: true,
+    };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function handleGetClipDraftMessage(locator: ClipDraftLocator | undefined) {
+  try {
+    if (!locator) throw new Error("Clip draft locator is required");
+    return { success: true, draft: await getClipDraft(locator) };
+  } catch (error) {
+    return {
+      success: false,
+      draft: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function handleSetClipMarkMessage(update: ClipMarkUpdate | undefined) {
+  try {
+    if (!update) throw new Error("Clip mark update is required");
+    return { success: true, draft: await setClipMark(update) };
+  } catch (error) {
+    return {
+      success: false,
+      draft: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function handleClearClipDraftMessage(locator: ClipDraftLocator | undefined) {
+  try {
+    if (!locator) throw new Error("Clip draft locator is required");
+    await clearClipDraft(locator);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 /**
  * Handle save config message
  */
@@ -432,6 +537,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleDownloadRequestMessage(message.payload).then(sendResponse);
         return true; // Return true to indicate async response
 
+      case MessageType.CLIP_REQUEST:
+        handleClipRequestMessage(message.payload).then(sendResponse);
+        return true;
+
       case MessageType.GET_DOWNLOADS:
         handleGetDownloadsMessage().then(sendResponse);
         return true;
@@ -442,6 +551,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case MessageType.GET_CONFIG:
         handleGetConfigMessage().then(sendResponse);
+        return true;
+
+      case MessageType.GET_PLAYBACK_CANDIDATES:
+        handleGetPlaybackCandidatesMessage(message.payload, sender).then(sendResponse);
+        return true;
+
+      case MessageType.GET_CLIP_DRAFT:
+        handleGetClipDraftMessage(message.payload?.locator).then(sendResponse);
+        return true;
+
+      case MessageType.SET_CLIP_MARK:
+        handleSetClipMarkMessage(message.payload).then(sendResponse);
+        return true;
+
+      case MessageType.CLEAR_CLIP_DRAFT:
+        handleClearClipDraftMessage(message.payload?.locator).then(sendResponse);
         return true;
 
       case MessageType.SAVE_CONFIG:

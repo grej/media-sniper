@@ -9,12 +9,14 @@ import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
 import { STORAGE_CONFIG_KEY } from "./shared/constants";
+import { PlaybackRegistry } from "./core/playback/registry";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 let sentToPopup = new Set<string>();
 let lastUrl = location.href;
 const inIframe = window.self !== window.top;
+const playbackRegistry = new PlaybackRegistry();
 
 /**
  * Send message to popup with error handling for extension context invalidation
@@ -73,6 +75,7 @@ function addDetectedVideo(video: VideoMetadata) {
     return;
   }
 
+  video.pageVideoId ??= playbackRegistry.findPageVideoId(video.url);
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
 
@@ -132,6 +135,11 @@ function addDetectedVideo(video: VideoMetadata) {
       updated = true;
     }
 
+    if (!existing.pageVideoId && video.pageVideoId) {
+      existing.pageVideoId = video.pageVideoId;
+      updated = true;
+    }
+
     // Only notify popup if metadata was actually updated
     // This prevents unnecessary updates that could cause flickering
     if (updated) {
@@ -160,6 +168,8 @@ function addDetectedVideo(video: VideoMetadata) {
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
 async function init() {
+  playbackRegistry.start();
+
   // Reset icon to gray on page load (only from top frame)
   if (!inIframe) {
     safeSendMessage({
@@ -206,6 +216,7 @@ function handleNavigation(): void {
   sentToPopup = new Set<string>();
 
   // Re-initialize
+  playbackRegistry.scan();
   init();
 }
 
@@ -242,6 +253,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   try {
+    if (message.type === MessageType.GET_PLAYBACK_CANDIDATES) {
+      sendResponse({ candidates: playbackRegistry.getCandidates(location.href) });
+      return false;
+    }
+
     if (message.type === MessageType.GET_DETECTED_VIDEOS) {
       // Convert Record to array for response
       sendResponse({ videos: Object.values(detectedVideos) });

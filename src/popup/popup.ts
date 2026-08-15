@@ -25,6 +25,7 @@ import {
   handleStartManifestDownload,
 } from "./render-manifest";
 import { switchTab } from "./tabs";
+import { destroyClipEditors } from "./clip-actions";
 
 const RENDER_DEBOUNCE_MS = 200;
 
@@ -517,6 +518,7 @@ async function init(): Promise<void> {
   dom.manifestLiveStreamInfo = document.getElementById("hlsLiveStreamInfo") as HTMLDivElement;
   dom.manifestQualitySelection = document.getElementById("hlsQualitySelection") as HTMLDivElement;
   dom.manifestProgress = document.getElementById("manifestProgress") as HTMLDivElement;
+  dom.manifestClipEditor = document.getElementById("manifestClipEditor") as HTMLDivElement;
   dom.detectedVideosList = document.getElementById("detectedVideosList") as HTMLDivElement;
   dom.themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
   dom.themeIcon = document.getElementById("themeIcon") as unknown as SVGElement;
@@ -625,3 +627,4 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+window.addEventListener("unload", destroyClipEditors);

@@ -50,6 +50,7 @@ export const dom = {
   manifestLiveStreamInfo: null as HTMLDivElement | null,
   manifestQualitySelection: null as HTMLDivElement | null,
   manifestProgress: null as HTMLDivElement | null,
+  manifestClipEditor: null as HTMLDivElement | null,
   detectedVideosList: null as HTMLDivElement | null,
   themeToggle: null as HTMLButtonElement | null,
   themeIcon: null as SVGElement | null,

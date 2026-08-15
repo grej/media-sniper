@@ -28,6 +28,7 @@ import {
 import { fetchTextViaBackground, formatQualityLabel } from "./utils";
 import { renderDownloads } from "./render-downloads";
 import { switchTab } from "./tabs";
+import { renderManualClipEditor } from "./clip-actions";
 
 const TAB_SWITCH_SETTLE_MS = 100;
 
@@ -133,8 +134,8 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
   const normalizedUrl = normalizeUrl(rawUrl);
 
   const format = detectFormatFromUrl(normalizedUrl);
-  if (format !== VideoFormat.HLS && format !== VideoFormat.DASH) {
-    alert("Please enter a valid manifest URL (.m3u8 or .mpd)");
+  if (format === VideoFormat.UNKNOWN) {
+    alert("Please enter a direct media or manifest URL (.mp4, .webm, .m3u8, or .mpd)");
     return;
   }
 
@@ -154,8 +155,24 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
   setUnsupportedManifest(false);
 
   try {
-    const playlistText = await fetchTextViaBackground(normalizedUrl);
     setCurrentManifestFormat(format);
+    setCurrentManualManifestUrl(normalizedUrl);
+
+    if (format === VideoFormat.DIRECT) {
+      setIsMediaPlaylistMode(true);
+      setIsLiveManifest(false);
+      if (dom.startManifestDownloadBtn) {
+        dom.startManifestDownloadBtn.disabled = false;
+        dom.startManifestDownloadBtn.textContent = "Download";
+      }
+      updateManualManifestFormState();
+      if (dom.manifestClipEditor) {
+        await renderManualClipEditor(dom.manifestClipEditor, normalizedUrl, format);
+      }
+      return;
+    }
+
+    const playlistText = await fetchTextViaBackground(normalizedUrl);
 
     if (format === VideoFormat.DASH) {
       setHasDrmInManifest(MpdParser.hasDrm(playlistText));
@@ -323,6 +340,11 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
     }
 
     updateManualManifestFormState();
+    if (!isLiveManifest && !hasDrmInManifest && !unsupportedManifest && dom.manifestClipEditor) {
+      await renderManualClipEditor(dom.manifestClipEditor, normalizedUrl, format);
+    } else {
+      dom.manifestClipEditor?.replaceChildren();
+    }
   } catch (error) {
     console.error("Failed to load manifest:", error);
     alert("Failed to load manifest. Please check the URL and try again.");
@@ -334,6 +356,7 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
     setHasDrmInManifest(false);
     setUnsupportedManifest(false);
     setIsLiveManifest(false);
+    dom.manifestClipEditor?.replaceChildren();
     updateManualManifestFormState();
   } finally {
     if (loadManifestPlaylistBtn) {
@@ -417,9 +440,11 @@ export async function handleStartManifestDownload(): Promise<void> {
 
     const metadata: VideoMetadata = {
       url: playlistUrl,
-      format: currentManifestFormat === VideoFormat.DASH
-        ? VideoFormat.DASH
-        : (isMediaPlaylistMode ? VideoFormat.M3U8 : VideoFormat.HLS),
+      format: currentManifestFormat === VideoFormat.DIRECT
+        ? VideoFormat.DIRECT
+        : currentManifestFormat === VideoFormat.DASH
+          ? VideoFormat.DASH
+          : (isMediaPlaylistMode ? VideoFormat.M3U8 : VideoFormat.HLS),
       title: tabTitle || "Manifest Video",
       pageUrl: pageUrl || window.location.href,
       isLive: isLiveManifest,

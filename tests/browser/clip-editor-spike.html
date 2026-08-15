@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Clip editor browser spike</title></head>
+  <body>
+    <main id="editor"></main>
+    <output id="result"></output>
+    <script type="module">
+      import { createClipEditor } from "/src/popup/clip-editor.ts";
+      let timeMs = 12_345;
+      const controller = createClipEditor({
+        sourceKey: "browser-spike",
+        getPlayback: async () => ({
+          pageVideoId: "fixture-video",
+          currentTimeMs: timeMs,
+          durationMs: 90_000,
+          label: "Fixture player",
+        }),
+        onSubmit: (value) => {
+          document.querySelector("#result").textContent = JSON.stringify(value);
+        },
+      });
+      document.querySelector("#editor").append(controller.element);
+      globalThis.setFixtureTime = (value) => { timeMs = value; };
+    </script>
+  </body>
+</html>
