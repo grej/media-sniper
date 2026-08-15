@@ -142,6 +142,11 @@ export class PlaybackRegistry {
       this.snapshot(pageVideoId, video, frameUrl));
   }
 
+  getElement(pageVideoId: string): HTMLVideoElement | undefined {
+    const video = this.videos.get(pageVideoId);
+    return video?.isConnected ? video : undefined;
+  }
+
   /** Finds the best local element association for detection metadata. */
   findPageVideoId(sourceUrl: string): string | undefined {
     this.scan();

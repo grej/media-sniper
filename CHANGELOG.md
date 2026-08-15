@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.12.0] - 2026-08-15
+
+### New Features
+
+- Introduce the Media Sniper identity while preserving Media Bridge upgrade data.
+- Add durable Fast and Exact clipping for direct MP4/WebM, HLS/M3U8, and static single-period DASH sources.
+- Add page-player marks, fixed `HH:MM:SS.mmm` clip controls with a seconds-display toggle, an optional Shadow DOM overlay, clipping settings, and clip-aware History labels.
+
+### Reliability and Safety
+
+- Limit direct media reads with bounded byte ranges and explicit consent for small sources whose servers ignore Range.
+- Fetch only selected segmented-media windows, retain authentication headers through temporary DNR rules, and clean temporary rules/chunks on terminal paths.
+- Refuse DRM, unsupported live/timeline layouts, unsafe memory sizes, and unsupported browser codecs with stable user-facing errors.
+
+### Packaging
+
+- Add deterministic release ZIP generation, SHA-256 verification, CI media verification, third-party notices, and release validation documentation.
+
 ## [1.11.0](https://github.com/jvillegasd/media-bridge/compare/v1.10.0...v1.11.0) (2026-03-07)
 
 

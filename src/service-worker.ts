@@ -434,6 +434,9 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
             (normalizedRequest.manifestQuality?.selectedBandwidth !== undefined
               ? String(normalizedRequest.manifestQuality.selectedBandwidth)
               : undefined),
+          manifestQuality: normalizedRequest.manifestQuality,
+          allowFullFetchForDirect:
+            normalizedRequest.allowFullFetchForDirect,
           outputContainer: normalizedRequest.outputContainer ?? "mp4",
         },
         createdAt: timestamp,
@@ -533,10 +536,24 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
   }
 }
 
-async function handleGetClipDraftMessage(locator: ClipDraftLocator | undefined) {
+function scopeDraftLocator(
+  locator: ClipDraftLocator,
+  sender: chrome.runtime.MessageSender,
+): ClipDraftLocator {
+  return {
+    ...locator,
+    tabId: sender.tab?.id ?? locator.tabId,
+    frameId: sender.frameId ?? locator.frameId,
+  };
+}
+
+async function handleGetClipDraftMessage(
+  locator: ClipDraftLocator | undefined,
+  sender: chrome.runtime.MessageSender,
+) {
   try {
     if (!locator) throw new Error("Clip draft locator is required");
-    return { success: true, draft: await getClipDraft(locator) };
+    return { success: true, draft: await getClipDraft(scopeDraftLocator(locator, sender)) };
   } catch (error) {
     return {
       success: false,
@@ -546,10 +563,19 @@ async function handleGetClipDraftMessage(locator: ClipDraftLocator | undefined) 
   }
 }
 
-async function handleSetClipMarkMessage(update: ClipMarkUpdate | undefined) {
+async function handleSetClipMarkMessage(
+  update: ClipMarkUpdate | undefined,
+  sender: chrome.runtime.MessageSender,
+) {
   try {
     if (!update) throw new Error("Clip mark update is required");
-    return { success: true, draft: await setClipMark(update) };
+    return {
+      success: true,
+      draft: await setClipMark({
+        ...update,
+        locator: scopeDraftLocator(update.locator, sender),
+      }),
+    };
   } catch (error) {
     return {
       success: false,
@@ -730,11 +756,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
 
       case MessageType.GET_CLIP_DRAFT:
-        handleGetClipDraftMessage(message.payload?.locator).then(sendResponse);
+        handleGetClipDraftMessage(message.payload?.locator, sender).then(sendResponse);
         return true;
 
       case MessageType.SET_CLIP_MARK:
-        handleSetClipMarkMessage(message.payload).then(sendResponse);
+        handleSetClipMarkMessage(message.payload, sender).then(sendResponse);
         return true;
 
       case MessageType.CLEAR_CLIP_DRAFT:
@@ -1216,7 +1242,7 @@ async function handlePostDownloadActions(downloadId: string): Promise<void> {
     const state = await getDownload(downloadId);
     if (!state) return;
 
-    const title = state.metadata.title || "Media Bridge";
+    const title = state.metadata.title || "Media Sniper";
     const filename = state.localPath?.split(/[/\\]/).pop() ?? "Download";
 
     if (notifications.notifyOnCompletion) {

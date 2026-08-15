@@ -13,6 +13,90 @@ describe("clip editor", () => {
     expect(formatEditorTime(12_345, "seconds")).toBe("12.345");
   });
 
+  it("honors the configured mode for a fresh draft while an existing draft wins", () => {
+    const fresh = createClipEditor({
+      sourceKey: "fresh",
+      defaultMode: "exact",
+      onSubmit: vi.fn(),
+    });
+    document.body.append(fresh.element);
+    expect(fresh.element.querySelector<HTMLSelectElement>(".clip-mode-select")?.value)
+      .toBe("exact");
+
+    const restored = createClipEditor({
+      sourceKey: "restored",
+      defaultMode: "exact",
+      draft: { startMs: 1_000, endMs: 2_000, mode: "fast" },
+      onSubmit: vi.fn(),
+    });
+    document.body.append(restored.element);
+    expect(restored.element.querySelector<HTMLSelectElement>(".clip-mode-select")?.value)
+      .toBe("fast");
+    fresh.destroy();
+    restored.destroy();
+  });
+
+  it("checks Exact capability lazily and disables it with a specific reason", async () => {
+    let resolveCapability!: (value: { supported: boolean; reason?: string }) => void;
+    const controller = createClipEditor({
+      sourceKey: "capability",
+      checkExactCapability: () => new Promise((resolve) => { resolveCapability = resolve; }),
+      onSubmit: vi.fn(),
+    });
+    document.body.append(controller.element);
+    const exact = controller.element.querySelector<HTMLOptionElement>('option[value="exact"]')!;
+    const message = controller.element.querySelector<HTMLElement>(".clip-capability")!;
+    expect(exact.disabled).toBe(true);
+    expect(message.textContent).toBe("Checking exact mode support…");
+
+    resolveCapability({
+      supported: false,
+      reason: "This browser cannot encode source video to MP4.",
+    });
+    await Promise.resolve();
+    expect(exact.disabled).toBe(true);
+    expect(message.textContent).toBe("This browser cannot encode source video to MP4.");
+    controller.destroy();
+  });
+
+  it("provides precise nudge controls, clamps them, and resets fresh defaults", () => {
+    const controller = createClipEditor({
+      sourceKey: "nudges",
+      durationMs: 1_000,
+      defaultMode: "exact",
+      draft: { startMs: 100, endMs: 950, mode: "fast" },
+      onSubmit: vi.fn(),
+    });
+    document.body.append(controller.element);
+
+    const nudges = [...controller.element.querySelectorAll<HTMLButtonElement>(".clip-nudge-btn")];
+    expect(nudges.map((control) => control.textContent)).toEqual([
+      "-10s",
+      "-1s",
+      "-0.1s",
+      "+0.1s",
+      "+1s",
+      "+10s",
+    ]);
+
+    const [start, end] = controller.element.querySelectorAll<HTMLInputElement>(".clip-time-input");
+    start!.focus();
+    nudges.find((control) => control.textContent === "-0.1s")!.click();
+    expect(start!.value).toBe("00:00:00.000");
+    end!.focus();
+    nudges.find((control) => control.textContent === "+0.1s")!.click();
+    expect(end!.value).toBe("00:00:01.000");
+
+    controller.element.querySelector<HTMLButtonElement>(".clip-reset-btn")!.click();
+    expect([start!.value, end!.value]).toEqual([
+      "00:00:00.000",
+      "00:00:01.000",
+    ]);
+    expect(controller.element.querySelector<HTMLSelectElement>(".clip-mode-select")?.value)
+      .toBe("exact");
+    controller.destroy();
+  });
+
   it("submits a normalized typed manual clip request", async () => {
     const onSubmit = vi.fn();
     const controller = createClipEditor({ sourceKey: "source", onSubmit });
@@ -60,6 +144,8 @@ describe("clip editor", () => {
     await Promise.resolve();
     expect(onSubmit.mock.calls[0]?.[0].clip.markSource).toBe("playback");
     controller.destroy();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getPlayback).toHaveBeenCalledTimes(2);
   });
 
   it("shows accessible errors and blocks invalid ranges", () => {
@@ -111,16 +197,79 @@ describe("clip editor", () => {
       onSubmit: vi.fn(),
     });
     document.body.append(controller.element);
+    expect(controller.element.querySelector<HTMLOutputElement>(".clip-duration")?.textContent)
+      .toBe("00:00:03.375");
     const display = controller.element.querySelector<HTMLSelectElement>(".clip-time-display-select")!;
     display.value = "seconds";
     display.dispatchEvent(new Event("change", { bubbles: true }));
     expect([...controller.element.querySelectorAll<HTMLInputElement>(".clip-time-input")]
       .map((input) => input.value)).toEqual(["62.125", "65.500"]);
+    expect(controller.element.querySelector<HTMLOutputElement>(".clip-duration")?.textContent)
+      .toBe("3.375");
     display.value = "clock";
     display.dispatchEvent(new Event("change", { bubbles: true }));
     expect([...controller.element.querySelectorAll<HTMLInputElement>(".clip-time-input")]
       .map((input) => input.value)).toEqual(["00:01:02.125", "00:01:05.500"]);
     controller.destroy();
+  });
+
+  it("requires an explicit player choice before playback marks", async () => {
+    const getPlayback = vi.fn(async (preferred?: string) => ({
+      pageVideoId: preferred ?? "video-a",
+      currentTimeMs: preferred === "video-b" ? 22_000 : 11_000,
+      durationMs: 120_000,
+      label: preferred ? "Chosen player" : "Choose a player",
+      requiresSelection: !preferred,
+      alternatives: [
+        { pageVideoId: "video-a", label: "Player A" },
+        { pageVideoId: "video-b", label: "Player B" },
+      ],
+    }));
+    const controller = createClipEditor({
+      sourceKey: "ambiguous",
+      getPlayback,
+      onSubmit: vi.fn(),
+    });
+    document.body.append(controller.element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const player = controller.element.querySelector<HTMLSelectElement>(".clip-player-select")!;
+    const start = controller.element.querySelector<HTMLButtonElement>('[data-mark="start"]')!;
+    expect(player.value).toBe("");
+    expect(start.disabled).toBe(true);
+    expect(controller.element.querySelector(".clip-current-time")?.getAttribute("aria-live"))
+      .toBe("off");
+
+    player.value = "video-b";
+    player.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getPlayback).toHaveBeenLastCalledWith("video-b");
+    expect(start.disabled).toBe(false);
+    start.click();
+    expect(controller.element.querySelector<HTMLInputElement>(".clip-time-input")?.value)
+      .toBe("00:00:22.000");
+    controller.destroy();
+  });
+
+  it("ignores a pending playback response after destruction", async () => {
+    let resolvePlayback!: (value: { currentTimeMs: number; label: string }) => void;
+    const getPlayback = vi.fn(() => new Promise<{ currentTimeMs: number; label: string }>((resolve) => {
+      resolvePlayback = resolve;
+    }));
+    const controller = createClipEditor({
+      sourceKey: "pending",
+      getPlayback,
+      onSubmit: vi.fn(),
+    });
+    document.body.append(controller.element);
+    controller.destroy();
+    resolvePlayback({ currentTimeMs: 42_000, label: "Late player" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.element.querySelector(".clip-current-time")?.textContent)
+      .toBe("Finding player…");
   });
 
   it("emits explicit direct full-fetch consent only when checked", async () => {

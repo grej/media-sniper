@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Media Bridge</title>
+  <title>Media Sniper</title>
   <link rel="stylesheet" href="/shared.css">
   <style>
     body {
@@ -884,6 +884,8 @@
     .clip-time-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
     .clip-time-control { display: grid; grid-template-columns: 1fr auto; gap: 5px; }
     .clip-time-control label { grid-column: 1 / -1; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+    .clip-duration-row { display:flex; align-items:center; justify-content:space-between; color:var(--text-secondary); font-size:11px; }
+    .clip-duration { color:var(--text-primary); font-variant-numeric:tabular-nums; }
     .clip-time-input,
     .clip-mode-select,
     .clip-quality-select,
@@ -899,7 +901,8 @@
     }
 
     .clip-mark-btn,
-    .clip-nudge-btn {
+    .clip-nudge-btn,
+    .clip-reset-btn {
       padding: 5px 7px;
       border: 1px solid var(--border-hover);
       border-radius: var(--radius-sm);
@@ -908,6 +911,8 @@
       font: 11px inherit;
       cursor: pointer;
     }
+
+    .clip-mark-btn:disabled { opacity:.5; cursor:not-allowed; }
 
     .clip-nudges { justify-content: center; }
     .clip-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
@@ -924,7 +929,7 @@
 <body>
   <!-- Header -->
   <div class="header">
-    <span class="header-title">Media Bridge</span>
+    <span class="header-title">Media Sniper</span>
     <div class="header-actions">
       <button id="historyBtn" class="header-btn" title="History">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

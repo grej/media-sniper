@@ -89,7 +89,7 @@ export class DirectDetectionHandler {
 
     // Check if it's audio-only (skip it)
     if (this.isAudioOnlyUrl(url)) {
-      console.log("[Media Bridge] Skipping audio-only URL:", url);
+      console.log("[Media Sniper] Skipping audio-only URL:", url);
       return null;
     }
 
@@ -191,7 +191,7 @@ export class DirectDetectionHandler {
 
     for (const result of results) {
       if (result.status === "fulfilled" && result.value) {
-        console.log("[Media Bridge] Detected video:", {
+        console.log("[Media Sniper] Detected video:", {
           url: result.value.url,
           format: result.value.format,
           pageUrl: result.value.pageUrl,

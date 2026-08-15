@@ -1,10 +1,12 @@
 import type { ClipRequest, ManifestQualitySelection } from "../core/clipping/types";
+import { canEncodeAudio, canEncodeVideo } from "mediabunny";
 import { selectPlaybackCandidate } from "../core/playback/selection";
 import type {
   ClipDraft,
   ClipDraftLocator,
   PlaybackCandidate,
 } from "../core/playback/types";
+import { loadSettings } from "../core/storage/settings";
 import { VideoFormat, type VideoMetadata } from "../core/types";
 import { normalizeUrl } from "../core/utils/url-utils";
 import { MessageType, type PlaybackCandidatesMessageResponse } from "../shared/messages";
@@ -18,6 +20,22 @@ import {
 } from "./clip-editor";
 
 const controllers = new Map<string, ClipEditorController>();
+
+async function checkBrowserExactCapability() {
+  if (!(await canEncodeVideo("avc"))) {
+    return {
+      supported: false,
+      reason: "This browser cannot encode source video to MP4.",
+    };
+  }
+  if (!(await canEncodeAudio("aac"))) {
+    return {
+      supported: false,
+      reason: "This browser cannot encode source audio to MP4.",
+    };
+  }
+  return { supported: true };
+}
 
 interface ActiveTabContext {
   tabId: number;
@@ -106,7 +124,8 @@ function playbackProvider(
       pageVideoId: candidate.pageVideoId,
       currentTimeMs: candidate.currentTimeMs,
       durationMs: candidate.durationMs,
-      label: selection.ambiguous ? "Choose a player" : candidateLabel(candidate, 0),
+      label: selection.ambiguous && !preferred ? "Choose a player" : candidateLabel(candidate, 0),
+      requiresSelection: selection.ambiguous && !preferred,
       alternatives: selection.alternatives.map((item, index) => ({
         pageVideoId: item.pageVideoId,
         label: candidateLabel(item, index),
@@ -143,7 +162,10 @@ async function mountEditor(
 ): Promise<ClipEditorController> {
   controllers.get(key)?.destroy();
   container.replaceChildren();
-  const context = await getActiveTabContext();
+  const [context, settings] = await Promise.all([
+    getActiveTabContext(),
+    loadSettings(),
+  ]);
   const locator: ClipDraftLocator = {
     tabId: context.tabId,
     frameId: video.frameId ?? -1,
@@ -157,8 +179,10 @@ async function mountEditor(
     sourceKey: key,
     durationMs: video.duration ? Math.round(video.duration * 1_000) : undefined,
     draft: toEditorDraft(draft),
+    defaultMode: settings.clipping.defaultMode,
     qualities,
     showDirectFullFetchConsent: video.format === VideoFormat.DIRECT,
+    checkExactCapability: checkBrowserExactCapability,
     getPlayback: playbackProvider(context, video),
     persistDraft: (value) => persistDraft(locator, value, qualities),
     onSubmit: async (value) => {

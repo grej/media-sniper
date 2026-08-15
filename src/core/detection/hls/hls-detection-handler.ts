@@ -132,12 +132,12 @@ export class HlsDetectionHandler {
       }
 
       logger.warn(
-        "[Media Bridge] HLS URL is neither master nor media playlist, skipping",
+        "[Media Sniper] HLS URL is neither master nor media playlist, skipping",
         { url },
       );
       return null;
     } catch (error) {
-      logger.error("[Media Bridge] Failed to validate HLS playlist:", error);
+      logger.error("[Media Sniper] Failed to validate HLS playlist:", error);
       return null;
     }
   }
@@ -163,7 +163,7 @@ export class HlsDetectionHandler {
 
     if (belongsToMaster) {
       logger.debug(
-        "[Media Bridge] M3U8 media playlist belongs to a master playlist, removing it",
+        "[Media Sniper] M3U8 media playlist belongs to a master playlist, removing it",
         url,
       );
       this.removeDetectedVideo(normalizedUrl);
@@ -173,7 +173,7 @@ export class HlsDetectionHandler {
     // It's a standalone media playlist, add it as M3U8 format
     // A media playlist without #EXT-X-ENDLIST is a live stream
     const isLive = !playlistText.includes("#EXT-X-ENDLIST");
-    logger.info("[Media Bridge] Detected standalone M3U8 media playlist", url);
+    logger.info("[Media Sniper] Detected standalone M3U8 media playlist", url);
     return await this.addDetectedVideo(url, VideoFormat.M3U8, playlistText, isLive);
   }
 
@@ -186,7 +186,7 @@ export class HlsDetectionHandler {
     normalizedUrl: string,
     playlistText: string,
   ): Promise<VideoMetadata | null> {
-    logger.info("[Media Bridge] Detected HLS Master Playlist", { url });
+    logger.info("[Media Sniper] Detected HLS Master Playlist", { url });
 
     // Parse once, reuse for tracking and liveness check
     const levels = parseMasterPlaylist(playlistText, url);
@@ -365,7 +365,7 @@ export class HlsDetectionHandler {
     const onVideoRemoved = this.onVideoRemoved;
     variantUrls.forEach((variantUrl) => {
       logger.debug(
-        "[Media Bridge] Removing variant video that belongs to master playlist",
+        "[Media Sniper] Removing variant video that belongs to master playlist",
         { variantUrl },
       );
       onVideoRemoved(variantUrl);

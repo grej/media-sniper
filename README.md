@@ -1,11 +1,13 @@
-# Media Bridge Browser Extension
+# Media Sniper Browser Extension
 
-A Manifest V3 Chromium extension that detects and downloads videos from the web — HLS, MPEG-DASH, and direct video URLs.
+A Manifest V3 Chromium extension that detects, downloads, records, and clips web video — HLS, MPEG-DASH, and direct media URLs.
 
 ## Features
 
 - **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), and direct video URLs (`.mp4`, `.webm`, etc.)
 - **Automatic Video Detection**: Content script detects videos via DOM observation and network request interception
+- **In-browser Clipping**: Create timestamped MP4 clips in Fast (keyframe-aligned) or Exact mode without a helper service
+- **Playback Marks**: Capture clip boundaries from a selected page player or enter millisecond-precise timestamps manually
 - **Live Stream Recording**: Record live HLS and DASH streams in real-time with a REC button
 - **Popup Interface**: Manual URL input with quality selector for HLS/DASH playlists
 - **Real-time Progress**: Download speed, percentage, and stage displayed live
@@ -56,7 +58,7 @@ Google Drive requires you to create your own OAuth credentials (free):
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd media-bridge
+cd media-sniper
 ```
 
 2. Install dependencies:
@@ -78,10 +80,13 @@ npm run build
 ### Production Build
 
 ```bash
-npm run build
+npm run package
+npm run package:check
 ```
 
-The built extension will be in the `dist` directory.
+The unpacked extension is written to `dist/`. The deterministic release archive
+and its SHA-256 file are written to `artifacts/`; `package:check` verifies the
+archive against that checksum.
 
 ## Usage
 
@@ -100,6 +105,23 @@ When visiting a page with video content:
 - Detected videos appear in the **Videos** tab
 - Click "Download" to start
 
+### Create a Clip
+
+1. Open a detected video or enter a media URL in the **Manifest** tab.
+2. Choose **Clip**, then enter start/end timestamps or mark them from the selected page player.
+3. Choose **Fast** for a keyframe-aligned stream copy or **Exact** for precise timing when the browser supports the source codecs.
+4. Choose the desired manifest quality, then click **Download clip**.
+
+Clip operations appear in History with their requested range, mode, accuracy,
+and actual duration when it is available. DRM-protected sources and unsupported
+live/timeline layouts are refused before media is downloaded.
+
+For a direct MP4/WebM source, Media Sniper first probes byte-range support. A
+short clip normally reads only bounded portions of the file. If the server
+ignores Range, a full fetch is never silent: the UI asks for explicit consent
+and only permits it when the source has a known size below the configured
+no-Range safety limit. Unknown or larger sources are refused.
+
 ### Live Stream Recording
 
 When a live stream is detected:
@@ -109,18 +131,18 @@ When a live stream is detected:
 
 ## Supported Formats
 
-| Format | Detection | VOD Download | Live Recording |
-|--------|-----------|-------------|----------------|
-| **HLS** (`.m3u8` master playlist) | ✅ | ✅ | ✅ |
-| **M3U8** (`.m3u8` media playlist) | ✅ | ✅ | — |
-| **DASH** (`.mpd` manifest) | ✅ | ✅ | ✅ |
-| **Direct** (`.mp4`, `.webm`, etc.) | ✅ | ✅ | — |
+| Format | Detection | VOD Download | Live Recording | MP4 Clipping |
+|--------|-----------|-------------|----------------|--------------|
+| **HLS** (`.m3u8` master playlist) | ✅ | ✅ | ✅ | ✅ |
+| **M3U8** (`.m3u8` media playlist) | ✅ | ✅ | — | ✅ |
+| **DASH** (`.mpd` manifest) | ✅ | ✅ | ✅ | ✅ |
+| **Direct** (`.mp4`, `.webm`, etc.) | ✅ | ✅ | — | ✅ |
 
 ## Technical Details
 
 ### Architecture
 
-Media Bridge has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
+Media Sniper has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
 
 1. **Service Worker** (`src/service-worker.ts`): Central orchestrator. Routes messages, manages download lifecycle, keeps itself alive via heartbeat.
 2. **Content Script** (`src/content.ts`): Runs on all pages. Detects videos via DOM observation and network interception. Proxies fetch requests through the service worker to bypass CORS.
@@ -245,6 +267,13 @@ npm run build
 
 # TypeScript type checking only
 npm run type-check
+
+# Unit and integration tests
+npm test
+
+# Reproducible release ZIP + SHA-256 verification
+npm run package
+npm run package:check
 ```
 
 ### Key Dependencies
@@ -264,6 +293,19 @@ npm run type-check
 - **DRM content** — FairPlay and PlayReady protected streams cannot be downloaded.
 - **CDN restrictions** — Some sites block extension requests via token auth or IP restrictions.
 - **Browser memory** — Total concurrent segment data is limited by available RAM.
+- **Fast boundaries** — Fast clips begin on a source keyframe and are labeled keyframe-aligned; use Exact when the runtime supports the source codecs and tighter boundaries are required.
+- **Live timelines** — Arbitrary past-range clips of a live manifest are not supported; existing REC/Stop & Save behavior is retained.
+
+## Privacy and security
+
+Media processing, clip assembly, and timestamp selection run locally in the
+browser. Media Sniper has no analytics or telemetry and does not send browsing
+or media data to a Media Sniper service. Network requests go only to the source
+page/CDN needed for detection and fetching, and to a cloud provider only when
+the user has explicitly configured and selected that provider. Temporary
+Origin/Referer rules are scoped to an operation and removed after completion,
+failure, or cancellation. Signed URLs and authentication material are not
+written to release evidence or test logs.
 
 ## Troubleshooting
 
@@ -284,4 +326,10 @@ npm run type-check
 
 ## License
 
-MIT License — see LICENSE file for details
+Media Sniper is derived from
+[Media Bridge](https://github.com/jvillegasd/media-bridge) 1.11.0 at commit
+`8eb58839d336ff3a0f85ea5292db2f276663e2d6`. The existing IndexedDB name and
+internal message contracts are intentionally retained for upgrade compatibility.
+
+MIT License — see [LICENSE](LICENSE) for the upstream copyright and full terms.
+Dependency notices are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

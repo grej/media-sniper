@@ -24,12 +24,6 @@ jobs:
           manifest-file: .github/.release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set zip filename
-        id: set-zip-name
-        if: ${{ steps.release.outputs.release_created }}
-        run: |
-          echo "zip_name=media-bridge-extension-${{ steps.release.outputs.tag_name }}.zip" >> $GITHUB_OUTPUT
-
       - uses: actions/checkout@v4
         if: ${{ steps.release.outputs.release_created }}
         with:
@@ -38,7 +32,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
         if: ${{ steps.release.outputs.release_created }}
 
@@ -46,30 +40,16 @@ jobs:
         run: npm ci
         if: ${{ steps.release.outputs.release_created }}
 
-      - name: Build extension
-        run: npm run build
+      - name: Build deterministic extension package
+        run: npm run package
         if: ${{ steps.release.outputs.release_created }}
 
-      - name: Create extension zip
-        run: |
-          cd dist
-          zip -r ../${{ steps.set-zip-name.outputs.zip_name }} .
-          cd ..
-          ls -lh ${{ steps.set-zip-name.outputs.zip_name }}
+      - name: Verify extension package checksum
+        run: npm run package:check
         if: ${{ steps.release.outputs.release_created }}
 
-      - name: Verify zip file exists
-        run: |
-          if [ ! -f "${{ steps.set-zip-name.outputs.zip_name }}" ]; then
-            echo "Error: Zip file not found!"
-            exit 1
-          fi
-          echo "Zip file found: $(ls -lh ${{ steps.set-zip-name.outputs.zip_name }})"
-        if: ${{ steps.release.outputs.release_created }}
-
-      - name: Upload release asset
+      - name: Upload release archive and checksum
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload ${{ steps.release.outputs.tag_name }} ${{ steps.set-zip-name.outputs.zip_name }} --clobber
+        run: gh release upload ${{ steps.release.outputs.tag_name }} artifacts/*.zip artifacts/*.zip.sha256 --clobber
         if: ${{ steps.release.outputs.release_created }}

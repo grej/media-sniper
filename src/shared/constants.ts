@@ -1,5 +1,5 @@
 /**
- * Shared constants for the Media Bridge extension.
+ * Shared constants for the Media Sniper extension.
  *
  * Values here are used across multiple modules. File-specific constants
  * remain co-located with their files.

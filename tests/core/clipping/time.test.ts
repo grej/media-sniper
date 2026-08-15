@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatTimeForFilename,
+  formatClockTimeMs,
   formatTimeMs,
   parseTimeInput,
   tryParseTimeInput,
@@ -60,6 +61,12 @@ describe("clip time formatting", () => {
   it("formats colon-free filename timestamps", () => {
     expect(formatTimeForFilename(363_000)).toBe("06m03s");
     expect(formatTimeForFilename(3_723_500)).toBe("01h02m03s500ms");
+  });
+
+  it("formats a fixed-width UI clock with three millisecond digits", () => {
+    expect(formatClockTimeMs(0)).toBe("00:00:00.000");
+    expect(formatClockTimeMs(75_250)).toBe("00:01:15.250");
+    expect(formatClockTimeMs(3_723_500)).toBe("01:02:03.500");
   });
 
   it.each([-1, 1.5, Number.POSITIVE_INFINITY])(
