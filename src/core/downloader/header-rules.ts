@@ -39,6 +39,81 @@ function buildUrlFilter(cdnUrl: string): string {
   return `||${url.hostname}${pathPrefix}`;
 }
 
+export interface OperationHeaderRuleScope {
+  operationId: string;
+  /** Representative URLs; each distinct directory becomes a narrow rule. */
+  urls: readonly string[];
+  pageUrl: string;
+}
+
+function operationRuleId(operationId: string, urlFilter: string): number {
+  const [id] = ruleIdsFromDownloadId(`${operationId}\0${urlFilter}`);
+  return id;
+}
+
+/** Pure builder used by clip handlers and tests. */
+export function buildOperationHeaderRules(
+  scope: OperationHeaderRuleScope,
+): chrome.declarativeNetRequest.Rule[] {
+  const origin = new URL(scope.pageUrl).origin;
+  const filters = [...new Set(scope.urls.map(buildUrlFilter))];
+  const usedIds = new Set<number>();
+
+  return filters.map((urlFilter) => {
+    let id = operationRuleId(scope.operationId, urlFilter);
+    while (usedIds.has(id)) id += 1;
+    usedIds.add(id);
+
+    return {
+      id,
+      priority: 1,
+      action: {
+        type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+        requestHeaders: [
+          {
+            header: "Origin",
+            operation: chrome.declarativeNetRequest.HeaderOperation.SET,
+            value: origin,
+          },
+          {
+            header: "Referer",
+            operation: chrome.declarativeNetRequest.HeaderOperation.SET,
+            value: origin + "/",
+          },
+        ],
+      },
+      condition: {
+        urlFilter,
+        initiatorDomains: [chrome.runtime.id],
+        resourceTypes: [
+          chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST,
+        ],
+      },
+    };
+  });
+}
+
+/**
+ * Add all path-scoped header rules required by one operation. Returned IDs are
+ * owned by the caller and are safe to pass to removeHeaderRules() in finally.
+ */
+export async function addOperationHeaderRules(
+  scope: OperationHeaderRuleScope,
+): Promise<number[]> {
+  const rules = buildOperationHeaderRules(scope);
+  const ruleIds = rules.map((rule) => rule.id);
+  if (rules.length === 0) return ruleIds;
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: ruleIds,
+    addRules: rules,
+  });
+  logger.info(
+    `[DNR] Added ${rules.length} scoped header rule(s) for operation ${scope.operationId}`,
+  );
+  return ruleIds;
+}
+
 /**
  * Add Origin + Referer header-injection rules scoped to a specific CDN path.
  *

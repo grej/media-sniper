@@ -3,6 +3,8 @@ import {
   parseLevelsPlaylist,
   parseMediaPlaylist,
   parseTimedMediaPlaylist,
+  parseHlsMasterDescriptor,
+  selectHlsClipVariant,
 } from "@/core/parsers/m3u8-parser";
 
 const BASE_URL = "https://cdn.example/path/playlist.m3u8";
@@ -193,5 +195,27 @@ encrypted.ts
         uri: "https://cdn.example/path/encrypted.ts",
       },
     ]);
+  });
+});
+
+describe("HLS clip master selection", () => {
+  it("selects audio only from the chosen variant's group", () => {
+    const text = playlist(`
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="low-audio",NAME="English",DEFAULT=YES,AUTOSELECT=YES,URI="low-en.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="high-audio",NAME="Commentary",URI="commentary.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="high-audio",NAME="English",DEFAULT=YES,AUTOSELECT=YES,URI="high-en.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=640x360,AUDIO="low-audio"
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1920x1080,AUDIO="high-audio"
+high.m3u8`);
+    const descriptor = parseHlsMasterDescriptor(text, BASE_URL);
+    expect(selectHlsClipVariant(descriptor)).toEqual({
+      videoUrl: "https://cdn.example/path/high.m3u8",
+      audioUrl: "https://cdn.example/path/high-en.m3u8",
+    });
+    expect(selectHlsClipVariant(descriptor, 500_000)).toEqual({
+      videoUrl: "https://cdn.example/path/low.m3u8",
+      audioUrl: "https://cdn.example/path/low-en.m3u8",
+    });
   });
 });

@@ -184,6 +184,81 @@ export function parseMasterPlaylist(
   return [...streamLevels, ...audioLevels];
 }
 
+export interface HlsMasterVariant {
+  uri: string;
+  bandwidth?: number;
+  width?: number;
+  height?: number;
+  audioGroupId?: string;
+}
+
+export interface HlsAudioRendition {
+  groupId: string;
+  name: string;
+  uri?: string;
+  isDefault: boolean;
+  autoselect: boolean;
+  language?: string;
+}
+
+export interface HlsMasterDescriptor {
+  variants: HlsMasterVariant[];
+  audioRenditions: HlsAudioRendition[];
+}
+
+/** Rich master shape used by clipping so audio remains associated with its variant. */
+export function parseHlsMasterDescriptor(
+  playlistText: string,
+  baseUrl: string,
+): HlsMasterDescriptor {
+  const parser = new Parser();
+  parser.push(playlistText);
+  parser.end();
+  const manifest = parser.manifest as any;
+  const variants = (manifest.playlists ?? []).map((playlist: any) => ({
+    uri: buildAbsoluteURL(baseUrl, playlist.uri),
+    bandwidth: playlist.attributes?.BANDWIDTH,
+    width: playlist.attributes?.RESOLUTION?.width,
+    height: playlist.attributes?.RESOLUTION?.height,
+    audioGroupId: playlist.attributes?.AUDIO,
+  }));
+  const audioRenditions: HlsAudioRendition[] = [];
+  for (const [groupId, entries] of Object.entries(manifest.mediaGroups?.AUDIO ?? {})) {
+    for (const [name, entryValue] of Object.entries(entries as Record<string, any>)) {
+      const entry = entryValue as any;
+      audioRenditions.push({
+        groupId,
+        name,
+        uri: entry.uri ? buildAbsoluteURL(baseUrl, entry.uri) : undefined,
+        isDefault: entry.default === true,
+        autoselect: entry.autoselect === true,
+        language: entry.language,
+      });
+    }
+  }
+  return { variants, audioRenditions };
+}
+
+export function selectHlsClipVariant(
+  descriptor: HlsMasterDescriptor,
+  selectedBandwidth?: number,
+): { videoUrl: string | null; audioUrl: string | null } {
+  const variants = [...descriptor.variants].sort((left, right) =>
+    (right.bandwidth ?? 0) - (left.bandwidth ?? 0)
+      || (right.height ?? 0) - (left.height ?? 0));
+  const variant = selectedBandwidth === undefined
+    ? variants[0]
+    : variants.find((item) => item.bandwidth === selectedBandwidth) ?? variants[0];
+  if (!variant) return { videoUrl: null, audioUrl: null };
+  const audio = variant.audioGroupId
+    ? descriptor.audioRenditions
+        .filter((item) => item.groupId === variant.audioGroupId && item.uri)
+        .sort((left, right) => Number(right.isDefault) - Number(left.isDefault)
+          || Number(right.autoselect) - Number(left.autoselect))[0]
+    : undefined;
+  return { videoUrl: variant.uri, audioUrl: audio?.uri ?? null };
+}
+
 /**
  * Check if a playlist is a master playlist (contains variants)
  */
@@ -262,6 +337,8 @@ export const M3u8Parser = {
   parseMediaPlaylist,
   parseTimedMediaPlaylist,
   parseMasterPlaylist,
+  parseHlsMasterDescriptor,
+  selectHlsClipVariant,
   isMasterPlaylist,
   isMediaPlaylist,
   belongsToMasterPlaylist,

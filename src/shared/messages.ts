@@ -68,6 +68,8 @@ export enum MessageType {
   OFFSCREEN_PROCESS_DASH_RESPONSE = "OFFSCREEN_PROCESS_DASH_RESPONSE",
   OFFSCREEN_PROCESS_MEDIABUNNY_CLIP = "OFFSCREEN_PROCESS_MEDIABUNNY_CLIP",
   OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE = "OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE",
+  OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP = "OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP",
+  OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE = "OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE",
   OFFSCREEN_CANCEL_MEDIA_JOB = "OFFSCREEN_CANCEL_MEDIA_JOB",
 
   // Icon management
@@ -161,6 +163,35 @@ export interface ClipDraftMessageResponse {
   error?: string;
 }
 
+/** IDB-backed offscreen request; binary media data is never serialized here. */
+export interface FastSegmentedClipPayload {
+  downloadId: string;
+  mediaFormat: "hls-ts" | "hls-fmp4" | "dash-fmp4";
+  inputKind: "combined" | "separate";
+  durationMs: number;
+  combinedLength?: number;
+  combinedRelativeStartMs?: number;
+  videoLength?: number;
+  audioLength?: number;
+  videoRelativeStartMs?: number;
+  audioRelativeStartMs?: number;
+}
+
+export interface FastSegmentedClipMessage extends BaseMessage {
+  type: MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP;
+  payload: FastSegmentedClipPayload;
+}
+
+export interface FastSegmentedClipResponsePayload {
+  downloadId: string;
+  type: "success" | "error" | "progress";
+  blobUrl?: string;
+  warning?: string;
+  error?: string;
+  progress?: number;
+  message?: string;
+}
+
 export type ExtensionMessage =
   | DownloadRequestMessage
   | DownloadProgressMessage
@@ -169,4 +200,5 @@ export type ExtensionMessage =
   | GetClipDraftMessage
   | SetClipMarkMessage
   | ClearClipDraftMessage
+  | FastSegmentedClipMessage
   | BaseMessage;

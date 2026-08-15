@@ -120,7 +120,22 @@ export async function processWithFFmpeg(
       reject(error);
     };
 
+    const cancelOffscreenJob = () => {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.OFFSCREEN_CANCEL_MEDIA_JOB,
+          payload: { downloadId },
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            // The offscreen document may already have completed or closed.
+          }
+        },
+      );
+    };
+
     const abortHandler = () => {
+      cancelOffscreenJob();
       settle(new CancellationError());
     };
 
@@ -185,9 +200,11 @@ export async function processWithFFmpeg(
 
     timeoutId = setTimeout(() => {
       if (abortSignal?.aborted) {
+        cancelOffscreenJob();
         settle(new CancellationError());
         return;
       }
+      cancelOffscreenJob();
       settle(new Error("FFmpeg processing timeout"));
     }, timeout);
   });

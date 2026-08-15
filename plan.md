@@ -14,7 +14,7 @@ acceptance evidence is recorded under `docs/development/`.
 - [x] M1 — Clipping domain model and persistence
 - [x] M2 — Playback registry and popup editor
 - [x] M3 — Timed HLS/M3U8 parsing and segment planner
-- [ ] M4 — HLS/M3U8 Fast clips
+- [x] M4 — HLS/M3U8 Fast clips
 - [ ] M5 — DASH Fast clips
 - [ ] M6 — Direct MP4/WebM clips
 - [ ] M7 — Exact segmented clips
