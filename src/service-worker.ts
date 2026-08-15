@@ -9,6 +9,7 @@ import { createOperationKey } from "./core/clipping/operation-key";
 import { HlsRecordingHandler } from "./core/downloader/hls/hls-recording-handler";
 import { HlsFastClipHandler } from "./core/downloader/hls/hls-fast-clip-handler";
 import { DashRecordingHandler } from "./core/downloader/dash/dash-recording-handler";
+import { DashFastClipHandler } from "./core/downloader/dash/dash-fast-clip-handler";
 import { ClipProgressTracker } from "./core/downloader/clip-progress";
 import {
   getAllDownloads,
@@ -358,7 +359,7 @@ function notifyClipProgress(state: DownloadState): void {
   }
 }
 
-/** Start a typed, durable, cancellable HLS/M3U8 Fast clip operation. */
+/** Start a typed, durable, cancellable segmented Fast clip operation. */
 async function handleClipRequestMessage(request: ClipRequest | undefined) {
   try {
     if (!request || typeof request.url !== "string" || !request.url.trim()) {
@@ -380,7 +381,8 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
     if (
       normalizedRequest.clip.mode !== "fast" ||
       (normalizedRequest.format !== VideoFormat.HLS &&
-        normalizedRequest.format !== VideoFormat.M3U8)
+        normalizedRequest.format !== VideoFormat.M3U8 &&
+        normalizedRequest.format !== VideoFormat.DASH)
     ) {
       throw new Error("This clipping path is not available yet for the selected source and mode");
     }
@@ -445,7 +447,10 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
         syncIntervalMs: settings.advanced.dbSyncIntervalMs,
         notify: notifyClipProgress,
       });
-      const handler = new HlsFastClipHandler();
+      const handler =
+        normalizedRequest.format === VideoFormat.DASH
+          ? new DashFastClipHandler()
+          : new HlsFastClipHandler();
       const promise = (async () => {
         try {
           const result = await handler.clip(

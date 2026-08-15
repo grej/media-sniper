@@ -15,7 +15,7 @@ acceptance evidence is recorded under `docs/development/`.
 - [x] M2 — Playback registry and popup editor
 - [x] M3 — Timed HLS/M3U8 parsing and segment planner
 - [x] M4 — HLS/M3U8 Fast clips
-- [ ] M5 — DASH Fast clips
+- [x] M5 — DASH Fast clips
 - [ ] M6 — Direct MP4/WebM clips
 - [ ] M7 — Exact segmented clips
 - [ ] M8 — Overlay, polish, regression, and release
