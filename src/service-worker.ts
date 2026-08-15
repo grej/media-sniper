@@ -67,6 +67,7 @@ import {
 import type { ClipDraftLocator, ClipMarkUpdate } from "./core/playback/types";
 import type { ClipRequest } from "./core/clipping/types";
 import { validateClipRange } from "./core/clipping/validation";
+import { selectClipHandlerKind } from "./core/clipping/routing";
 import { deleteClipOperationChunks } from "./core/database/clip-chunks";
 
 interface ActiveRuntimeOperation {
@@ -360,7 +361,7 @@ function notifyClipProgress(state: DownloadState): void {
   }
 }
 
-/** Start a typed, durable, cancellable segmented Fast clip operation. */
+/** Start a typed, durable, cancellable direct or segmented clip operation. */
 async function handleClipRequestMessage(request: ClipRequest | undefined) {
   try {
     if (!request || typeof request.url !== "string" || !request.url.trim()) {
@@ -379,14 +380,8 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
         endMs: range.value.endMs,
       },
     };
-    if (
-      (normalizedRequest.format !== VideoFormat.DIRECT &&
-        normalizedRequest.clip.mode !== "fast") ||
-      (normalizedRequest.format !== VideoFormat.DIRECT &&
-        normalizedRequest.format !== VideoFormat.HLS &&
-        normalizedRequest.format !== VideoFormat.M3U8 &&
-        normalizedRequest.format !== VideoFormat.DASH)
-    ) {
+    const handlerKind = selectClipHandlerKind(normalizedRequest);
+    if (!handlerKind) {
       throw new Error("This clipping path is not available yet for the selected source and mode");
     }
 
@@ -451,9 +446,9 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
         notify: notifyClipProgress,
       });
       const handler =
-        normalizedRequest.format === VideoFormat.DIRECT
+        handlerKind === "direct"
           ? new DirectClipHandler()
-          : normalizedRequest.format === VideoFormat.DASH
+          : handlerKind === "dash-segmented"
           ? new DashFastClipHandler()
           : new HlsFastClipHandler();
       const promise = (async () => {
@@ -504,7 +499,10 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
       updateKeepAlive();
       createOffscreenDocument()
         .then(() => {
-          if (normalizedRequest.format !== VideoFormat.DIRECT) {
+          if (
+            normalizedRequest.format !== VideoFormat.DIRECT &&
+            normalizedRequest.clip.mode === "fast"
+          ) {
             chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG });
           }
         })
@@ -828,6 +826,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE:
+      case MessageType.OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE:
         // Handled by ffmpeg-bridge's dynamic onMessage listener in processWithFFmpeg()
         return false;

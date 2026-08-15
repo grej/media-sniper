@@ -34,12 +34,18 @@ import {
 import { fetchTextWithFinalUrl } from "../../utils/fetch-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { CancellationError, DownloadError } from "../../utils/errors";
+import { ClippingError } from "../../clipping/errors";
 import { throwIfAborted } from "../../utils/cancellation";
 import { logger } from "../../utils/logger";
 import {
   MessageType,
+  type ExactSegmentedClipPayload,
   type FastSegmentedClipPayload,
 } from "../../../shared/messages";
+import {
+  processSegmentedExactClipOffscreen,
+  type SegmentedExactOffscreenResult,
+} from "../../media/segmented-exact-clip-bridge";
 
 export interface DashFastClipProgress {
   stage: DownloadStage;
@@ -53,7 +59,7 @@ export interface DashFastClipProgress {
 export interface DashFastClipResult {
   filePath: string;
   filename: string;
-  accuracy: "keyframe-aligned";
+  accuracy: "keyframe-aligned" | "exact";
   requestedDurationMs: number;
   actualDurationMs?: number;
   mediaFormat: "dash-fmp4";
@@ -96,6 +102,13 @@ export interface DashFastClipHandlerDependencies {
   removeRules?: typeof removeHeaderRules;
   deleteOperationChunks?: typeof deleteClipOperationChunks;
   process?: (job: DashFastClipProcessJob) => Promise<ProcessWithFFmpegResult>;
+  processExact?: (job: {
+    operationId: string;
+    payload: Omit<ExactSegmentedClipPayload, "downloadId">;
+    timeoutMs: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: number, processedTimeMs?: number, message?: string) => void;
+  }) => Promise<SegmentedExactOffscreenResult>;
   save?: typeof saveBlobUrlToFile;
 }
 
@@ -170,6 +183,7 @@ export class DashFastClipHandler {
   private readonly removeRules: typeof removeHeaderRules;
   private readonly deleteOperationChunks: typeof deleteClipOperationChunks;
   private readonly process: NonNullable<DashFastClipHandlerDependencies["process"]>;
+  private readonly processExact: NonNullable<DashFastClipHandlerDependencies["processExact"]>;
   private readonly save: typeof saveBlobUrlToFile;
 
   constructor(dependencies: DashFastClipHandlerDependencies = {}) {
@@ -184,6 +198,7 @@ export class DashFastClipHandler {
     this.deleteOperationChunks =
       dependencies.deleteOperationChunks ?? deleteClipOperationChunks;
     this.process = dependencies.process ?? defaultProcess;
+    this.processExact = dependencies.processExact ?? processSegmentedExactClipOffscreen;
     this.save = dependencies.save ?? saveBlobUrlToFile;
   }
 
@@ -196,9 +211,6 @@ export class DashFastClipHandler {
   ): Promise<DashFastClipResult> {
     if (request.format !== VideoFormat.DASH) {
       throw new TypeError("DashFastClipHandler only accepts DASH requests");
-    }
-    if (request.clip.mode !== "fast") {
-      throw new TypeError("DashFastClipHandler only implements Fast clips");
     }
     assertValidClipRange(request.clip, {
       maxDurationMs: settings.clipping.maxClipDurationMs,
@@ -240,7 +252,7 @@ export class DashFastClipHandler {
         tracks,
         range.startMs,
         range.endMs,
-        "fast",
+        request.clip.mode,
       );
       requireSelections(selected, tracks.audio !== null);
 
@@ -382,25 +394,57 @@ export class DashFastClipHandler {
         signal.removeEventListener("abort", cancelDownloads);
       }
       throwIfAborted(signal);
+      const downloadedBytes = downloadResults.reduce(
+        (sum, result) => sum + result.downloadedBytes,
+        0,
+      );
+      if (
+        request.clip.mode === "exact" &&
+        downloadedBytes >= settings.clipping.maxInMemoryClipBytes
+      ) {
+        throw new ClippingError(
+          "OUTPUT_TOO_LARGE",
+          `Selected Exact input exceeds the ${settings.clipping.maxInMemoryClipBytes}-byte in-memory limit`,
+        );
+      }
 
+      const exact = request.clip.mode === "exact";
       onProgress?.({
         stage: DownloadStage.PROCESSING,
         percentage: 76,
-        message: "Creating keyframe-aligned MP4 clip",
+        message: exact
+          ? "Encoding frame-exact MP4 clip"
+          : "Creating keyframe-aligned MP4 clip",
       });
-      const processed = await this.process({
-        operationId,
-        filename,
-        payload: processPayload,
-        timeoutMs: settings.ffmpegTimeout,
-        signal,
-        onProgress: (progress, message) =>
-          onProgress?.({
-            stage: DownloadStage.PROCESSING,
-            percentage: 76 + Math.min(1, Math.max(0, progress)) * 20,
-            message: message || "Processing DASH clip",
-          }),
-      });
+      const processed = exact
+        ? await this.processExact({
+            operationId,
+            payload: {
+              ...processPayload,
+              maxOutputBytes: settings.clipping.maxInMemoryClipBytes,
+            },
+            timeoutMs: settings.ffmpegTimeout,
+            signal,
+            onProgress: (progress, _processedTimeMs, message) =>
+              onProgress?.({
+                stage: DownloadStage.PROCESSING,
+                percentage: 76 + Math.min(1, Math.max(0, progress)) * 20,
+                message: message || "Encoding exact DASH clip",
+              }),
+          })
+        : await this.process({
+            operationId,
+            filename,
+            payload: processPayload,
+            timeoutMs: settings.ffmpegTimeout,
+            signal,
+            onProgress: (progress, message) =>
+              onProgress?.({
+                stage: DownloadStage.PROCESSING,
+                percentage: 76 + Math.min(1, Math.max(0, progress)) * 20,
+                message: message || "Processing DASH clip",
+              }),
+          });
       onProgress?.({
         stage: DownloadStage.SAVING,
         percentage: 98,
@@ -411,15 +455,15 @@ export class DashFastClipHandler {
         filename,
         operationId,
       );
-      const downloadedBytes = downloadResults.reduce(
-        (sum, result) => sum + result.downloadedBytes,
-        0,
-      );
       return {
         filePath,
         filename,
-        accuracy: "keyframe-aligned",
+        accuracy: exact ? "exact" : "keyframe-aligned",
         requestedDurationMs: range.durationMs,
+        actualDurationMs:
+          "actualDurationMs" in processed
+            ? processed.actualDurationMs
+            : undefined,
         mediaFormat: "dash-fmp4",
         inputKind,
         videoRepresentationId: tracks.video.representationId,
@@ -431,7 +475,7 @@ export class DashFastClipHandler {
         selectedAudioParts:
           plans.find((plan) => plan.kind === "audio")?.parts.length ?? 0,
         downloadedBytes,
-        warning: processed.warning,
+        warning: "warning" in processed ? processed.warning : undefined,
       };
     } catch (error) {
       if (

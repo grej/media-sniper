@@ -26,6 +26,10 @@ import {
   type OperationHeaderRuleScope,
 } from "../header-rules";
 import { processWithFFmpeg, type ProcessWithFFmpegResult } from "../../ffmpeg/ffmpeg-bridge";
+import {
+  processSegmentedExactClipOffscreen,
+  type SegmentedExactOffscreenResult,
+} from "../../media/segmented-exact-clip-bridge";
 import { fetchTextWithFinalUrl } from "../../utils/fetch-utils";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
@@ -33,7 +37,11 @@ import { CancellationError, DownloadError } from "../../utils/errors";
 import { ClippingError } from "../../clipping/errors";
 import { throwIfAborted } from "../../utils/cancellation";
 import { logger } from "../../utils/logger";
-import { MessageType, type FastSegmentedClipPayload } from "../../../shared/messages";
+import {
+  MessageType,
+  type ExactSegmentedClipPayload,
+  type FastSegmentedClipPayload,
+} from "../../../shared/messages";
 
 export interface HlsFastClipProgress {
   stage: DownloadStage;
@@ -47,7 +55,7 @@ export interface HlsFastClipProgress {
 export interface HlsFastClipResult {
   filePath: string;
   filename: string;
-  accuracy: "keyframe-aligned";
+  accuracy: "keyframe-aligned" | "exact";
   requestedDurationMs: number;
   actualDurationMs?: number;
   mediaFormat: FastSegmentedClipPayload["mediaFormat"];
@@ -85,6 +93,13 @@ export interface HlsFastClipHandlerDependencies {
   removeRules?: typeof removeHeaderRules;
   deleteOperationChunks?: typeof deleteClipOperationChunks;
   process?: (job: HlsFastClipProcessJob) => Promise<ProcessWithFFmpegResult>;
+  processExact?: (job: {
+    operationId: string;
+    payload: Omit<ExactSegmentedClipPayload, "downloadId">;
+    timeoutMs: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: number, processedTimeMs?: number, message?: string) => void;
+  }) => Promise<SegmentedExactOffscreenResult>;
   save?: typeof saveBlobUrlToFile;
 }
 
@@ -256,6 +271,7 @@ export class HlsFastClipHandler {
   private readonly removeRules: typeof removeHeaderRules;
   private readonly deleteOperationChunks: typeof deleteClipOperationChunks;
   private readonly process: NonNullable<HlsFastClipHandlerDependencies["process"]>;
+  private readonly processExact: NonNullable<HlsFastClipHandlerDependencies["processExact"]>;
   private readonly save: typeof saveBlobUrlToFile;
 
   constructor(dependencies: HlsFastClipHandlerDependencies = {}) {
@@ -266,6 +282,7 @@ export class HlsFastClipHandler {
     this.deleteOperationChunks =
       dependencies.deleteOperationChunks ?? deleteClipOperationChunks;
     this.process = dependencies.process ?? defaultProcess;
+    this.processExact = dependencies.processExact ?? processSegmentedExactClipOffscreen;
     this.save = dependencies.save ?? saveBlobUrlToFile;
   }
 
@@ -278,9 +295,6 @@ export class HlsFastClipHandler {
   ): Promise<HlsFastClipResult> {
     if (request.format !== VideoFormat.HLS && request.format !== VideoFormat.M3U8) {
       throw new TypeError("HlsFastClipHandler only accepts HLS or M3U8 requests");
-    }
-    if (request.clip.mode !== "fast") {
-      throw new TypeError("HlsFastClipHandler only implements Fast clips");
     }
     assertValidClipRange(request.clip, {
       maxDurationMs: settings.clipping.maxClipDurationMs,
@@ -410,7 +424,7 @@ export class HlsFastClipHandler {
           video.parsed.segments,
           range.startMs,
           range.endMs,
-          "fast",
+          request.clip.mode,
         );
         if (!selection) throw new DownloadError("Clip range contains no HLS media");
         assertNoDiscontinuityCrossing(selection, "Combined HLS");
@@ -430,7 +444,7 @@ export class HlsFastClipHandler {
           audio!.parsed.segments,
           range.startMs,
           range.endMs,
-          "fast",
+          request.clip.mode,
         );
         if (!selected.video || !selected.audio) {
           throw new DownloadError("Clip range is missing required HLS video or audio media");
@@ -542,47 +556,79 @@ export class HlsFastClipHandler {
         signal.removeEventListener("abort", cancelDownloads);
       }
       throwIfAborted(signal);
+      const downloadedBytes = downloadResults.reduce(
+        (sum, result) => sum + result.downloadedBytes,
+        0,
+      );
+      if (
+        request.clip.mode === "exact" &&
+        downloadedBytes >= settings.clipping.maxInMemoryClipBytes
+      ) {
+        throw new ClippingError(
+          "OUTPUT_TOO_LARGE",
+          `Selected Exact input exceeds the ${settings.clipping.maxInMemoryClipBytes}-byte in-memory limit`,
+        );
+      }
 
+      const exact = request.clip.mode === "exact";
       onProgress?.({
         stage: DownloadStage.PROCESSING,
         percentage: 76,
-        message: "Creating keyframe-aligned MP4 clip",
+        message: exact
+          ? "Encoding frame-exact MP4 clip"
+          : "Creating keyframe-aligned MP4 clip",
       });
-      const processed = await this.process({
-        operationId,
-        filename,
-        payload: processPayload,
-        timeoutMs: settings.ffmpegTimeout,
-        signal,
-        onProgress: (progress, message) =>
-          onProgress?.({
-            stage: DownloadStage.PROCESSING,
-            percentage: 76 + Math.min(1, Math.max(0, progress)) * 20,
-            message: message || "Processing HLS clip",
-          }),
-      });
+      const processed = exact
+        ? await this.processExact({
+            operationId,
+            payload: {
+              ...processPayload,
+              maxOutputBytes: settings.clipping.maxInMemoryClipBytes,
+            },
+            timeoutMs: settings.ffmpegTimeout,
+            signal,
+            onProgress: (progress, _processedTimeMs, message) =>
+              onProgress?.({
+                stage: DownloadStage.PROCESSING,
+                percentage: 76 + Math.min(1, Math.max(0, progress)) * 20,
+                message: message || "Encoding exact HLS clip",
+              }),
+          })
+        : await this.process({
+            operationId,
+            filename,
+            payload: processPayload,
+            timeoutMs: settings.ffmpegTimeout,
+            signal,
+            onProgress: (progress, message) =>
+              onProgress?.({
+                stage: DownloadStage.PROCESSING,
+                percentage: 76 + Math.min(1, Math.max(0, progress)) * 20,
+                message: message || "Processing HLS clip",
+              }),
+          });
       onProgress?.({
         stage: DownloadStage.SAVING,
         percentage: 98,
         message: "Saving MP4 clip",
       });
       const filePath = await this.save(processed.blobUrl, filename, operationId);
-      const downloadedBytes = downloadResults.reduce(
-        (sum, result) => sum + result.downloadedBytes,
-        0,
-      );
       return {
         filePath,
         filename,
-        accuracy: "keyframe-aligned",
+        accuracy: exact ? "exact" : "keyframe-aligned",
         requestedDurationMs: range.durationMs,
+        actualDurationMs:
+          "actualDurationMs" in processed
+            ? processed.actualDurationMs
+            : undefined,
         mediaFormat,
         selectedVideoPlaylistUrl: video.url,
         selectedAudioPlaylistUrl: audio?.url,
         selectedVideoParts: plans.find((plan) => plan.kind !== "audio")?.parts.length ?? 0,
         selectedAudioParts: plans.find((plan) => plan.kind === "audio")?.parts.length ?? 0,
         downloadedBytes,
-        warning: processed.warning,
+        warning: "warning" in processed ? processed.warning : undefined,
       };
     } catch (error) {
       if (signal.aborted || (error instanceof Error && error.name === "AbortError")) {

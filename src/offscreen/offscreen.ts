@@ -7,6 +7,7 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import {
   MessageType,
+  type ExactSegmentedClipPayload,
   type FastSegmentedClipPayload,
 } from "../shared/messages";
 import { readChunkRange } from "../core/database/chunks";
@@ -18,6 +19,7 @@ import {
 import { buildFastSegmentedClipArgs } from "../core/ffmpeg/fast-segmented-args";
 import { MediaJobQueue } from "../core/media/media-job-queue";
 import { runAbortableMediaJob } from "../core/media/abortable-media-job";
+import { processSegmentedExactClip } from "../core/media/segmented-exact-processor";
 import { createBoundedRangeFetch } from "../core/media/bounded-range-fetch";
 import {
   MediabunnyCapabilityError,
@@ -655,6 +657,84 @@ async function processFastSegmentedClip(
   }
 }
 
+async function processExactSegmentedClip(
+  payload: ExactSegmentedClipPayload,
+  signal: AbortSignal,
+  onProgress?: (progress: number, processedTimeMs: number) => void,
+) {
+  validateDownloadId(payload.downloadId);
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+  if (
+    payload.mediaFormat !== "hls-ts" &&
+    payload.mediaFormat !== "hls-fmp4" &&
+    payload.mediaFormat !== "dash-fmp4"
+  ) {
+    throw new Error(`Unsupported Exact segmented format: ${payload.mediaFormat}`);
+  }
+
+  let input;
+  if (payload.inputKind === "combined") {
+    input = {
+      kind: "combined" as const,
+      blob: await concatenateSelectedTrack(
+        payload.downloadId,
+        "combined",
+        payload.combinedLength ?? 0,
+      ),
+      relativeStartMs: payload.combinedRelativeStartMs ?? 0,
+    };
+  } else if (payload.inputKind === "separate") {
+    const [videoBlob, audioBlob] = await Promise.all([
+      concatenateSelectedTrack(
+        payload.downloadId,
+        "video",
+        payload.videoLength ?? 0,
+      ),
+      concatenateSelectedTrack(
+        payload.downloadId,
+        "audio",
+        payload.audioLength ?? 0,
+      ),
+    ]);
+    input = {
+      kind: "separate" as const,
+      videoBlob,
+      audioBlob,
+      videoRelativeStartMs: payload.videoRelativeStartMs ?? 0,
+      audioRelativeStartMs: payload.audioRelativeStartMs ?? 0,
+    };
+  } else {
+    throw new Error(`Unsupported Exact segmented input kind: ${payload.inputKind}`);
+  }
+  const selectedInputBytes = input.kind === "combined"
+    ? input.blob.size
+    : input.videoBlob.size + input.audioBlob.size;
+  if (payload.maxOutputBytes && selectedInputBytes >= payload.maxOutputBytes) {
+    throw new Error(
+      `Selected Exact input exceeds the ${payload.maxOutputBytes}-byte in-memory limit`,
+    );
+  }
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+  const result = await processSegmentedExactClip({
+    mediaFormat: payload.mediaFormat,
+    input,
+    durationMs: payload.durationMs,
+    signal,
+    onProgress,
+  });
+  if (payload.maxOutputBytes && result.size > payload.maxOutputBytes) {
+    throw new Error(
+      `Exact clip output exceeds the ${payload.maxOutputBytes}-byte in-memory limit`,
+    );
+  }
+  return {
+    blobUrl: URL.createObjectURL(result.blob),
+    size: result.size,
+    accuracy: result.accuracy,
+    actualDurationMs: result.actualDurationMs,
+  };
+}
+
 /**
  * Send a message to the service worker, swallowing any errors
  * (the service worker might not be listening).
@@ -768,6 +848,61 @@ function handleProcessingMessage(
  * Handle messages from service worker
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === MessageType.OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP) {
+    const payload = message.payload as ExactSegmentedClipPayload;
+    validateDownloadId(payload.downloadId);
+    const controller = new AbortController();
+    mediaJobControllers.get(payload.downloadId)?.abort();
+    mediaJobControllers.set(payload.downloadId, controller);
+    sendResponse({ acknowledged: true });
+
+    mediaJobQueue
+      .enqueue(() =>
+        processExactSegmentedClip(
+          payload,
+          controller.signal,
+          (progress, processedTimeMs) => {
+            sendToServiceWorker({
+              type: MessageType.OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE,
+              payload: {
+                downloadId: payload.downloadId,
+                type: "progress",
+                progress,
+                processedTimeMs,
+                message: "Encoding exact segmented clip",
+              },
+            });
+          },
+        ),
+      )
+      .then((result) => {
+        sendToServiceWorker({
+          type: MessageType.OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE,
+          payload: { downloadId: payload.downloadId, type: "success", ...result },
+        });
+      })
+      .catch((error) => {
+        sendToServiceWorker({
+          type: MessageType.OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE,
+          payload: {
+            downloadId: payload.downloadId,
+            type: "error",
+            error: error instanceof Error ? error.message : String(error),
+            capabilityError: error instanceof MediabunnyCapabilityError,
+          },
+        });
+      })
+      .finally(async () => {
+        await deleteClipOperationChunks(payload.downloadId).catch((error) =>
+          logger.warn(`Failed to clean Exact clip chunks for ${payload.downloadId}:`, error),
+        );
+        if (mediaJobControllers.get(payload.downloadId) === controller) {
+          mediaJobControllers.delete(payload.downloadId);
+        }
+      });
+    return true;
+  }
+
   if (message.type === MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP) {
     const payload = message.payload as FastSegmentedClipPayload;
     validateDownloadId(payload.downloadId);

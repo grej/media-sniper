@@ -1,0 +1,106 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Media Sniper segmented Exact browser spike</title>
+<button id="run">Run deterministic Exact matrix</button>
+<pre id="result">Ready</pre>
+<script type="module">
+  import { BlobSource, Input, MP4 } from "mediabunny";
+  import { processSegmentedExactClip } from "/src/core/media/segmented-exact-processor.ts";
+
+  const result = document.querySelector("#result");
+  const load = async (path) => (await fetch(path)).blob();
+
+  async function inspect(label, converted, requestedDurationMs) {
+    const input = new Input({ formats: [MP4], source: new BlobSource(converted.blob) });
+    try {
+      const [duration, video, audio] = await Promise.all([
+        input.getDurationFromMetadata(),
+        input.getPrimaryVideoTrack(),
+        input.getPrimaryAudioTrack(),
+      ]);
+      const [videoStart, audioStart] = await Promise.all([
+        video?.getFirstTimestamp(),
+        audio?.getFirstTimestamp(),
+      ]);
+      const actualDurationMs = duration == null ? undefined : Math.round(duration * 1000);
+      return {
+        label,
+        size: converted.size,
+        accuracy: converted.accuracy,
+        requestedDurationMs,
+        actualDurationMs,
+        boundaryErrorMs:
+          actualDurationMs === undefined
+            ? undefined
+            : Math.abs(actualDurationMs - requestedDurationMs),
+        videoStartMs: videoStart == null ? undefined : Math.round(videoStart * 1000),
+        audioStartMs: audioStart == null ? undefined : Math.round(audioStart * 1000),
+        avStartDeltaMs:
+          videoStart == null || audioStart == null
+            ? undefined
+            : Math.abs(Math.round((videoStart - audioStart) * 1000)),
+        passed:
+          actualDurationMs !== undefined &&
+          Math.abs(actualDurationMs - requestedDurationMs) <= 100 &&
+          (videoStart == null || audioStart == null ||
+            Math.abs(Math.round((videoStart - audioStart) * 1000)) <= 100),
+      };
+    } finally {
+      input.dispose();
+    }
+  }
+
+  async function run() {
+    result.textContent = "Loading deterministic fixtures…";
+    const [muxedMp4, transportStream, videoMp4, audioMp4] = await Promise.all([
+      load("/tests/fixtures/direct-faststart.mp4"),
+      load("/tests/fixtures/exact-hls.mpegts"),
+      load("/tests/fixtures/exact-video.mp4"),
+      load("/tests/fixtures/exact-audio.mp4"),
+    ]);
+    const requestedDurationMs = 3_200;
+    const cases = [
+      {
+        label: "HLS TS combined",
+        mediaFormat: "hls-ts",
+        input: { kind: "combined", blob: transportStream, relativeStartMs: 2_100 },
+      },
+      {
+        label: "HLS fMP4 combined",
+        mediaFormat: "hls-fmp4",
+        input: { kind: "combined", blob: muxedMp4, relativeStartMs: 2_100 },
+      },
+      {
+        label: "DASH fMP4 separate A/V",
+        mediaFormat: "dash-fmp4",
+        input: {
+          kind: "separate",
+          videoBlob: videoMp4,
+          audioBlob: audioMp4,
+          videoRelativeStartMs: 2_100,
+          audioRelativeStartMs: 2_100,
+        },
+      },
+    ];
+    const rows = [];
+    for (const item of cases) {
+      result.textContent = `Encoding ${item.label}…`;
+      const converted = await processSegmentedExactClip({
+        mediaFormat: item.mediaFormat,
+        input: item.input,
+        durationMs: requestedDurationMs,
+      });
+      rows.push(await inspect(item.label, converted, requestedDurationMs));
+    }
+    result.textContent = JSON.stringify({
+      passed: rows.every((row) => row.passed),
+      rows,
+    }, null, 2);
+  }
+
+  document.querySelector("#run").addEventListener("click", () => {
+    run().catch((error) => {
+      result.textContent = JSON.stringify({ passed: false, error: String(error), stack: error?.stack }, null, 2);
+    });
+  });
+</script>
