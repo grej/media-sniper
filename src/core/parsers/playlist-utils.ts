@@ -1,4 +1,5 @@
 import { Fragment } from "../types";
+import type { TimedMediaSegment } from "../clipping/types";
 
 export interface ParsedSegment {
   uri: string;
@@ -9,6 +10,21 @@ export interface ParsedSegment {
 
 export interface ParsedPlaylist {
   segments: ParsedSegment[];
+}
+
+/**
+ * Rich media-playlist segment. The legacy fields remain present so existing
+ * full-download and recording consumers can continue through
+ * `parseLevelsPlaylist()` unchanged.
+ */
+export interface TimedParsedSegment extends ParsedSegment, TimedMediaSegment {}
+
+export interface TimedParsedPlaylist extends ParsedPlaylist {
+  segments: TimedParsedSegment[];
+  mediaSequence: number;
+  discontinuitySequence: number;
+  durationMs: number;
+  endList: boolean;
 }
 
 /**

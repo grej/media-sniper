@@ -65,3 +65,65 @@ export interface OperationKeyInput {
   pageUrl?: string;
   referrer?: string;
 }
+
+/** A byte range expressed as an offset and byte count. */
+export interface ByteRangeSpec {
+  offset: number;
+  length: number;
+}
+
+/** HLS AES-128 metadata retained from the source manifest. */
+export interface EncryptionSpec {
+  method: "AES-128";
+  keyUri: string;
+  explicitIv?: Uint8Array;
+  /** Original HLS media sequence number, used for implicit IV derivation. */
+  sequenceNumber: number;
+}
+
+export interface MediaInitializationSegment {
+  uri: string;
+  byteRange?: ByteRangeSpec;
+}
+
+/**
+ * Format-neutral media segment with absolute presentation timing.
+ *
+ * `sourceIndex` and `sequenceNumber` deliberately remain independent of the
+ * dense storage index assigned after a clip window has been selected.
+ */
+export interface TimedMediaSegment {
+  sourceIndex: number;
+  sequenceNumber?: number;
+  uri: string;
+  startMs: number;
+  durationMs: number;
+  endMs: number;
+  byteRange?: ByteRangeSpec;
+  init?: MediaInitializationSegment;
+  encryption?: EncryptionSpec;
+  discontinuitySequence?: number;
+}
+
+export interface DenseStorageSegment {
+  storageIndex: number;
+  segment: TimedMediaSegment;
+}
+
+export interface TrackClipSelection {
+  requestedStartMs: number;
+  requestedEndMs: number;
+  mediaWindowStartMs: number;
+  mediaWindowEndMs: number;
+  relativeStartMs: number;
+  targetDurationMs: number;
+  initSegments: MediaInitializationSegment[];
+  mediaSegments: TimedMediaSegment[];
+  denseMediaSegments: DenseStorageSegment[];
+  leftDecodePaddingSegments: number;
+}
+
+export interface IndependentTrackClipSelection {
+  video: TrackClipSelection | null;
+  audio: TrackClipSelection | null;
+}
