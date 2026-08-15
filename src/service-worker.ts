@@ -10,6 +10,7 @@ import { HlsRecordingHandler } from "./core/downloader/hls/hls-recording-handler
 import { HlsFastClipHandler } from "./core/downloader/hls/hls-fast-clip-handler";
 import { DashRecordingHandler } from "./core/downloader/dash/dash-recording-handler";
 import { DashFastClipHandler } from "./core/downloader/dash/dash-fast-clip-handler";
+import { DirectClipHandler } from "./core/downloader/direct/direct-clip-handler";
 import { ClipProgressTracker } from "./core/downloader/clip-progress";
 import {
   getAllDownloads,
@@ -379,8 +380,10 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
       },
     };
     if (
-      normalizedRequest.clip.mode !== "fast" ||
-      (normalizedRequest.format !== VideoFormat.HLS &&
+      (normalizedRequest.format !== VideoFormat.DIRECT &&
+        normalizedRequest.clip.mode !== "fast") ||
+      (normalizedRequest.format !== VideoFormat.DIRECT &&
+        normalizedRequest.format !== VideoFormat.HLS &&
         normalizedRequest.format !== VideoFormat.M3U8 &&
         normalizedRequest.format !== VideoFormat.DASH)
     ) {
@@ -448,7 +451,9 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
         notify: notifyClipProgress,
       });
       const handler =
-        normalizedRequest.format === VideoFormat.DASH
+        normalizedRequest.format === VideoFormat.DIRECT
+          ? new DirectClipHandler()
+          : normalizedRequest.format === VideoFormat.DASH
           ? new DashFastClipHandler()
           : new HlsFastClipHandler();
       const promise = (async () => {
@@ -498,7 +503,11 @@ async function handleClipRequestMessage(request: ClipRequest | undefined) {
       runtime.promise = promise;
       updateKeepAlive();
       createOffscreenDocument()
-        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
+        .then(() => {
+          if (normalizedRequest.format !== VideoFormat.DIRECT) {
+            chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG });
+          }
+        })
         .catch((error) => logger.error("FFmpeg pre-warm failed:", error));
       promise
         .catch((error) => {

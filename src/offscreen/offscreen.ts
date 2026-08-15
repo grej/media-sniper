@@ -18,6 +18,7 @@ import {
 import { buildFastSegmentedClipArgs } from "../core/ffmpeg/fast-segmented-args";
 import { MediaJobQueue } from "../core/media/media-job-queue";
 import { runAbortableMediaJob } from "../core/media/abortable-media-job";
+import { createBoundedRangeFetch } from "../core/media/bounded-range-fetch";
 import {
   MediabunnyCapabilityError,
   processMediabunnyClip,
@@ -666,6 +667,45 @@ function sendToServiceWorker(msg: object): void {
   });
 }
 
+async function fetchBlobWithLimit(
+  url: string,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<Blob> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new Error("A positive full-fetch byte limit is required");
+  }
+  const response = await fetch(url, { credentials: "include", signal });
+  if (!response.ok) throw new Error(`Full media fetch returned HTTP ${response.status}`);
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error(`Full media fetch exceeds the ${maxBytes}-byte safety limit`);
+  }
+  if (!response.body) {
+    const blob = await response.blob();
+    if (blob.size > maxBytes) throw new Error(`Full media fetch exceeds the ${maxBytes}-byte safety limit`);
+    return blob;
+  }
+  const reader = response.body.getReader();
+  const chunks: BlobPart[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel("Media source exceeded the full-fetch safety limit");
+        throw new Error(`Full media fetch exceeds the ${maxBytes}-byte safety limit`);
+      }
+      chunks.push(value.slice().buffer as ArrayBuffer);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+}
+
 /**
  * Wire up an async FFmpeg processing handler for a given message type.
  * Returns true if the message was handled, false otherwise.
@@ -786,7 +826,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP) {
-    const { downloadId, url, startMs, endMs, exact } = message.payload as {
+    const { downloadId, url, startMs, endMs, exact, fullFetch, maxFullFetchBytes } = message.payload as {
       downloadId: string;
       url: string;
       startMs: number;
@@ -797,6 +837,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       maxRetries?: number;
       retryDelayMs?: number;
       retryBackoffFactor?: number;
+      fullFetch?: boolean;
+      maxFullFetchBytes?: number;
+      maxOutputBytes?: number;
     };
     validateDownloadId(downloadId);
 
@@ -807,29 +850,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     mediaJobQueue
       .enqueue(async () => {
+        const input = fullFetch
+          ? {
+              kind: "blob" as const,
+              blob: await fetchBlobWithLimit(url, maxFullFetchBytes ?? 0, controller.signal),
+            }
+          : {
+              kind: "url" as const,
+              url,
+              requestInit: { credentials: "include" as const },
+              maxCacheSize: message.payload.maxCacheSize as number | undefined,
+              parallelism: message.payload.parallelism as number | undefined,
+              getRetryDelay: (attempt: number) => {
+                const maxRetries = (message.payload.maxRetries as number) ?? 3;
+                if (attempt >= maxRetries) return null;
+                const delayMs = (message.payload.retryDelayMs as number) ?? 100;
+                const factor =
+                  (message.payload.retryBackoffFactor as number) ?? 1.15;
+                return (delayMs * factor ** attempt) / 1000;
+              },
+              fetchFn: createBoundedRangeFetch(),
+            };
         const result = await processMediabunnyClip({
-          input: {
-            kind: "url",
-            url,
-            requestInit: { credentials: "include" },
-            maxCacheSize: message.payload.maxCacheSize as number | undefined,
-            parallelism: message.payload.parallelism as number | undefined,
-            getRetryDelay: (attempt) => {
-              const maxRetries = (message.payload.maxRetries as number) ?? 3;
-              if (attempt >= maxRetries) return null;
-              const delayMs = (message.payload.retryDelayMs as number) ?? 100;
-              const factor =
-                (message.payload.retryBackoffFactor as number) ?? 1.15;
-              return (delayMs * factor ** attempt) / 1000;
-            },
-            fetchFn: (input, init) =>
-              fetch(
-                new Request(input, {
-                  ...init,
-                  credentials: "include",
-                }),
-              ),
-          },
+          input,
           startMs,
           endMs,
           exact,
@@ -848,11 +891,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           },
         });
 
+        const maxOutputBytes = message.payload.maxOutputBytes as number | undefined;
+        if (maxOutputBytes && result.blob.size > maxOutputBytes) {
+          throw new Error(`Clip output exceeds the ${maxOutputBytes}-byte in-memory limit`);
+        }
+
         const blobUrl = URL.createObjectURL(result.blob);
         return {
           blobUrl,
           size: result.blob.size,
           accuracy: result.accuracy,
+          actualDurationMs: result.actualDurationMs,
         };
       })
       .then((result) => {
