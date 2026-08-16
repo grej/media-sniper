@@ -1,4 +1,9 @@
-export const DEFAULT_MEDIA_RANGE_REQUEST_BYTES = 256 * 1024;
+/**
+ * Keep open-ended media reads bounded without turning a clip into hundreds of
+ * small HTTP requests. Two MiB is still a modest per-request ceiling, while
+ * substantially reducing round trips through higher-latency media proxies.
+ */
+export const DEFAULT_MEDIA_RANGE_REQUEST_BYTES = 2 * 1024 * 1024;
 
 /**
  * Preserve Mediabunny's fetch contract while bounding open-ended byte ranges.
