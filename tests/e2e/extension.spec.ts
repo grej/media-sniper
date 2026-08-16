@@ -65,6 +65,7 @@ async function detectedVideosForTab(tabId: number): Promise<Array<Record<string,
 
 async function openPopupPage(): Promise<Page> {
   const popup = await harness.context.newPage();
+  await popup.setViewportSize({ width: 400, height: 480 });
   await popup.goto(`chrome-extension://${harness.extensionId}/popup/popup.html`);
   await activateFixtureTab();
   await popup.reload();
@@ -196,6 +197,38 @@ test("defaults clip timestamps to clock format and toggles to seconds", async ()
   await popup.locator(".clip-time-display-select").selectOption("seconds");
   await expect(fields.nth(0)).toHaveValue("0.000");
   await expect(fields.nth(1)).toHaveValue(/^\d+\.\d{3}$/);
+  await popup.close();
+});
+
+test("stacks clip timestamps and keeps every editor control inside the popup", async () => {
+  const popup = await openPopupPage();
+  await openClipEditor(popup);
+
+  const timeControls = popup.locator(".clip-time-control");
+  const startBox = await timeControls.nth(0).boundingBox();
+  const endBox = await timeControls.nth(1).boundingBox();
+  expect(startBox).not.toBeNull();
+  expect(endBox).not.toBeNull();
+  expect(endBox!.y).toBeGreaterThanOrEqual(startBox!.y + startBox!.height);
+
+  const layout = await popup.locator(".clip-editor").evaluate((editor) => {
+    const editorRect = editor.getBoundingClientRect();
+    const controls = [...editor.querySelectorAll<HTMLElement>("button, input, select")];
+    return {
+      documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      editorOverflow: editor.scrollWidth - editor.clientWidth,
+      outOfBounds: controls
+        .filter((control) => {
+          const rect = control.getBoundingClientRect();
+          return rect.left < editorRect.left - 0.5 || rect.right > editorRect.right + 0.5;
+        })
+        .map((control) => control.className),
+    };
+  });
+
+  expect(layout.documentOverflow).toBeLessThanOrEqual(0);
+  expect(layout.editorOverflow).toBeLessThanOrEqual(0);
+  expect(layout.outOfBounds).toEqual([]);
   await popup.close();
 });
 
