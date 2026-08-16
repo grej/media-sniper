@@ -83,6 +83,7 @@
       display: none;
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
       min-height: 0;
     }
 
@@ -94,6 +95,7 @@
     #detectedVideosList {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: var(--space-3);
       min-height: 0;
     }
@@ -262,6 +264,7 @@
     /* ---- Action Buttons (card-level) ---- */
     .card-actions {
       display: flex;
+      flex-wrap: wrap;
       gap: 6px;
       margin-top: 6px;
     }
@@ -862,27 +865,36 @@
 
     .clip-editor {
       display: grid;
-      gap: var(--space-3);
+      gap: var(--space-2);
+      min-width: 0;
+      max-width: 100%;
       margin-top: var(--space-3);
-      padding: var(--space-3);
+      padding: var(--space-2);
       border: 1px solid var(--border-hover);
       border-radius: var(--radius-md);
       background: var(--surface-2);
     }
 
-    .clip-editor-header,
-    .clip-editor-footer,
-    .clip-nudges {
-      display: flex;
+    .clip-editor-header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
       gap: var(--space-2);
     }
 
-    .clip-editor-header strong { margin-right: auto; }
-    .clip-current-time { color: var(--text-secondary); font-size: 11px; }
+    .clip-editor-header strong { white-space: nowrap; }
+    .clip-current-time {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--text-secondary);
+      font-size: 11px;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .clip-close-btn { border: 0; background: transparent; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
-    .clip-time-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-    .clip-time-control { display: grid; grid-template-columns: 1fr auto; gap: 5px; }
+    .clip-time-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+    .clip-time-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; min-width: 0; }
     .clip-time-control label { grid-column: 1 / -1; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
     .clip-duration-row { display:flex; align-items:center; justify-content:space-between; color:var(--text-secondary); font-size:11px; }
     .clip-duration { color:var(--text-primary); font-variant-numeric:tabular-nums; }
@@ -898,6 +910,7 @@
       background: var(--surface-1);
       color: var(--text-primary);
       font: 12px inherit;
+      width: 100%;
     }
 
     .clip-mark-btn,
@@ -914,13 +927,18 @@
 
     .clip-mark-btn:disabled { opacity:.5; cursor:not-allowed; }
 
-    .clip-nudges { justify-content: center; }
-    .clip-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-    .clip-options label { display: grid; gap: 4px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+    .clip-nudges {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--space-1);
+    }
+    .clip-nudges button { min-width: 0; padding-inline: 3px; }
+    .clip-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+    .clip-options label { display: grid; min-width: 0; gap: 4px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
     .clip-options .clip-full-fetch-consent { grid-column: 1 / -1; display: block; font-weight: 400; line-height: 1.35; }
     .clip-capability { color: var(--text-tertiary); font-size: 10px; }
     .clip-error { min-height: 14px; color: var(--recording); font-size: 11px; }
-    .clip-editor-footer { justify-content: flex-end; }
+    .clip-editor-footer { display: flex; justify-content: flex-end; }
     .clip-submit-btn { width: 100%; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
