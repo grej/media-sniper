@@ -154,9 +154,9 @@ function validAuth(value: unknown): boolean {
       !Array.isArray(value.cookies) || value.cookies.length > 2048) return false;
   return value.cookies.every((cookie) => {
     if (!isRecord(cookie) || !onlyKeys(cookie, ["name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expirationDate", "hostOnly", "session"])) return false;
-    return typeof cookie.name === "string" && cookie.name.length <= 1024 &&
+    return boundedString(cookie.name, 256) &&
       typeof cookie.value === "string" && cookie.value.length <= 8192 &&
-      boundedString(cookie.domain, 1024) && boundedString(cookie.path, 2048) &&
+      boundedString(cookie.domain, 255) && boundedString(cookie.path, 2048) &&
       typeof cookie.secure === "boolean" && typeof cookie.httpOnly === "boolean" &&
       ["no_restriction", "lax", "strict", "unspecified"].includes(String(cookie.sameSite)) &&
       (cookie.expirationDate === undefined || nonNegativeNumber(cookie.expirationDate)) &&
@@ -208,8 +208,8 @@ function validHealth(value: unknown): boolean {
   if (!onlyKeys(capabilities, ["probe", "download", "sectionDownload", "exactClip", "currentTabCookies", "braveProfileCookies", "revealOutput"]) ||
       !Object.values(capabilities).every((entry) => typeof entry === "boolean")) return false;
   if (!value.issues.every(validFailure)) return false;
-  return value.braveProfiles === undefined || (Array.isArray(value.braveProfiles) && value.braveProfiles.length <= 128 && value.braveProfiles.every((profile) =>
-    isRecord(profile) && onlyKeys(profile, ["id", "name"]) && boundedString(profile.id, 128) && boundedString(profile.name, 512)));
+  return Array.isArray(value.braveProfiles) && value.braveProfiles.length <= 128 && value.braveProfiles.every((profile) =>
+    isRecord(profile) && onlyKeys(profile, ["id", "name"]) && boundedString(profile.id, 128) && boundedString(profile.name, 512));
 }
 
 function validRequestPayload(type: string, payload: Record<string, unknown>): boolean {
@@ -256,7 +256,8 @@ function validEventPayload(type: string, payload: Record<string, unknown>): bool
     case "job_progress":
       return onlyKeys(payload, ["jobId", "stage", "downloadedBytes", "totalBytes", "percentage", "speedBytesPerSecond", "etaSeconds", "mediaRole", "detail"]) &&
         boundedString(payload.jobId, 128) && ["planning", "downloading", "merging", "processing", "saving", "completed"].includes(String(payload.stage)) &&
-        optionalNonNegativeNumber(payload.downloadedBytes) && optionalNonNegativeNumber(payload.totalBytes) &&
+        (payload.downloadedBytes === undefined || integer(payload.downloadedBytes)) &&
+        (payload.totalBytes === undefined || integer(payload.totalBytes)) &&
         (payload.percentage === undefined || (nonNegativeNumber(payload.percentage) && (payload.percentage as number) <= 100)) &&
         optionalNonNegativeNumber(payload.speedBytesPerSecond) && optionalNonNegativeNumber(payload.etaSeconds) &&
         (payload.mediaRole === undefined || ["audio", "video", "combined"].includes(String(payload.mediaRole))) &&

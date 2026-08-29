@@ -105,6 +105,7 @@ async function main() {
     requireFile("installer/macos/InstallMediaSniperCompanion.swift"),
     requireFile("installer/macos/UninstallMediaSniperCompanion.swift"),
     requireFile("scripts/build-macos-companion-release.mjs"),
+    requireFile("scripts/extension-isolation.mjs"),
     requireFile("scripts/managed-tools.mjs"),
     requireFile("packaging/companion/THIRD_PARTY_NOTICES.md"),
   ]);

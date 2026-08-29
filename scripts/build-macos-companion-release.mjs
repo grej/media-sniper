@@ -27,7 +27,7 @@ import { renderCompatibilityTable } from "./generate-compatibility.mjs";
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageMetadata = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
 
-function parseArguments(argumentsList) {
+export function parseArguments(argumentsList) {
   const values = { development: false };
   for (let index = 0; index < argumentsList.length; index += 1) {
     const key = argumentsList[index];
@@ -43,6 +43,16 @@ function parseArguments(argumentsList) {
   return values;
 }
 
+export function validateReleaseArgumentPolicy(values) {
+  if (values.development) return;
+  if (typeof values["sign-identity"] !== "string" || !values["sign-identity"].trim()) {
+    throw new Error("Production release creation requires --sign-identity");
+  }
+  if (typeof values["notary-profile"] !== "string" || !values["notary-profile"].trim()) {
+    throw new Error("Production release creation requires --notary-profile");
+  }
+}
+
 function required(values, name) {
   const value = values[name];
   if (typeof value !== "string" || !value) throw new Error(`--${name} is required`);
@@ -55,6 +65,18 @@ function run(executable, argumentsList) {
     throw new Error(
       `${executable} failed (${result.status}): ${(result.stderr || result.stdout).trim()}`,
     );
+  }
+}
+
+function verifyDeveloperIdSignature(path, label) {
+  run("codesign", ["--verify", "--strict", "--verbose=2", path]);
+  const details = spawnSync("codesign", ["-dv", "--verbose=4", path], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  const output = `${details.stdout ?? ""}\n${details.stderr ?? ""}`;
+  if (details.status !== 0 || !/Authority=Developer ID Application:/i.test(output)) {
+    throw new Error(`${label} must be individually signed with Developer ID before manifest hashing`);
   }
 }
 
@@ -116,13 +138,17 @@ async function main() {
   );
   const extension = resolve(values.extension ?? join(projectRoot, "dist-companion"));
   const outputDirectory = resolve(values.output ?? join(projectRoot, "artifacts"));
-  if (!values.development && !values["sign-identity"]) {
-    throw new Error("Production release creation requires --sign-identity");
-  }
+  validateReleaseArgumentPolicy(values);
 
   const hostMetadata = await stat(host);
   if (!hostMetadata.isFile() || (hostMetadata.mode & 0o111) === 0) {
     throw new Error("Native host must be an executable regular file");
+  }
+  if (!values.development) {
+    verifyDeveloperIdSignature(host, "Native host");
+    for (const name of ["yt-dlp", "ffmpeg", "ffprobe", "deno"]) {
+      verifyDeveloperIdSignature(join(tools, "bin", name), `Managed ${name}`);
+    }
   }
   const extensionManifest = JSON.parse(
     await readFile(join(extension, "manifest.json"), "utf8"),
@@ -155,8 +181,9 @@ async function main() {
     publicKeyPem,
   });
 
-  const releaseName =
-    `media-sniper-companion-macos-${toolReleaseMetadata.target}-v${packageMetadata.version}`;
+  const releaseName = values.development
+    ? `media-sniper-companion-macos-${toolReleaseMetadata.target}-development-v${packageMetadata.version}`
+    : `media-sniper-companion-macos-${toolReleaseMetadata.target}-v${packageMetadata.version}`;
   const releaseRoot = join(outputDirectory, `${releaseName}.staging`);
   const diskImagePath = join(outputDirectory, `${releaseName}.dmg`);
   await mkdir(outputDirectory, { recursive: true });
@@ -230,15 +257,12 @@ async function main() {
 
   const signIdentity = values.development ? "-" : values["sign-identity"];
   for (const app of [installApp, uninstallApp]) {
-    run("codesign", [
-      "--force",
-      "--options",
-      "runtime",
-      "--timestamp",
-      "--sign",
-      signIdentity,
-      app,
-    ]);
+    const signingArguments = ["--force"];
+    if (!values.development) {
+      signingArguments.push("--options", "runtime", "--timestamp");
+    }
+    signingArguments.push("--sign", signIdentity, app);
+    run("codesign", signingArguments);
     run("codesign", ["--verify", "--deep", "--strict", app]);
   }
 
@@ -254,7 +278,7 @@ async function main() {
     "Media Sniper Companion",
     diskImagePath,
   ]);
-  if (!values.development && values["notary-profile"]) {
+  if (!values.development) {
     run("xcrun", [
       "notarytool",
       "submit",
@@ -264,6 +288,7 @@ async function main() {
       "--wait",
     ]);
     run("xcrun", ["stapler", "staple", diskImagePath]);
+    run("xcrun", ["stapler", "validate", diskImagePath]);
   }
   const digest = createHash("sha256").update(await readFile(diskImagePath)).digest("hex");
   await writeFile(`${diskImagePath}.sha256`, `${digest}  ${releaseName}.dmg\n`, "utf8");
@@ -272,4 +297,6 @@ async function main() {
   console.log(`SHA-256: ${digest}`);
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}

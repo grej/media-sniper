@@ -4,7 +4,9 @@ import type {
   OperationKeyInput,
 } from "./types";
 
-const OPERATION_KEY_VERSION = 1;
+// v2 adds the backend discriminator. Persisted v1 keys remain opaque history
+// identities and are intentionally never reinterpreted or rewritten on read.
+const OPERATION_KEY_VERSION = 2;
 
 function normalizeUrlForIdentity(value?: string): string | undefined {
   if (!value) return undefined;

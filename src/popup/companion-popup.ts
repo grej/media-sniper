@@ -388,6 +388,13 @@ export async function initializeCompanionPopup(): Promise<void> {
   list.parentElement?.insertBefore(root, list);
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type !== MSG.changed) return;
+    if (message.payload?.activeTabChanged === true) {
+      void send<{ summaries: YtDlpMediaSummary[] }>(MSG.state)
+        .then((state) => { summary = state.summaries[0] ?? null; fallback = null; })
+        .catch(() => { summary = null; fallback = null; })
+        .finally(() => void render());
+      return;
+    }
     if ((message.payload as CompanionFallback)?.reason) fallback = message.payload as CompanionFallback;
     if ((message.payload as ErrorView)?.code) setError(message.payload);
     void render();

@@ -93,9 +93,10 @@ describe("download v4 operation defaults", () => {
     const state = legacyState(DownloadStage.COMPLETED);
     state.operation = {
       kind: "clip",
-      operationKey: "clip-key",
+      operationKey: 'media-operation:{"version":1,"url":"legacy"}',
       requestedDurationMs: 5_000,
     };
     expect(withOperationDefaults(state).operation).toBe(state.operation);
+    expect(withOperationDefaults(state).operation?.operationKey).toContain('"version":1');
   });
 });

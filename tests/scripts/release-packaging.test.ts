@@ -21,6 +21,13 @@ import {
   releasePublicKeyRawBase64,
 } from "../../scripts/managed-tools.mjs";
 import baseManifest from "../../manifest.json";
+// @ts-expect-error JavaScript release helper has no declaration file.
+import {
+  parseArguments,
+  validateReleaseArgumentPolicy,
+} from "../../scripts/build-macos-companion-release.mjs";
+// @ts-expect-error JavaScript release helper has no declaration file.
+import { validateStandardArtifactContents } from "../../scripts/extension-isolation.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -35,6 +42,30 @@ describe("extension release variants", () => {
     expect(COMPANION_EXTENSION_ORIGIN).toBe(
       `chrome-extension://${COMPANION_EXTENSION_ID}/`,
     );
+  });
+
+  it.each([
+    "Companion",
+    "NativeMessaging",
+    "Native Messaging",
+    "NATIVE_MESSAGING",
+    "ConnectNative",
+    "COMPANION_HEALTH",
+    "yt-dlp",
+    "com.grej.media_sniper",
+    COMPANION_EXTENSION_ID.toUpperCase(),
+    "Cookies",
+  ])("rejects case-varied or concrete companion marker %s from standard text", (marker) => {
+    expect(() => validateStandardArtifactContents([
+      { name: "background.js", contents: Buffer.from(`const marker = ${JSON.stringify(marker)}`) },
+    ], "fixture")).toThrow("forbidden token");
+  });
+
+  it("does not decode opaque pinned binaries during the standard scan", () => {
+    expect(() => validateStandardArtifactContents([
+      { name: "ffmpeg-core.wasm", contents: Buffer.from("Companion NativeMessaging Cookies") },
+      { name: "opaque.bin", contents: Buffer.from("yt-dlp ConnectNative") },
+    ], "fixture")).not.toThrow();
   });
 
   it("adds companion permissions only to the companion manifest", () => {
@@ -57,6 +88,24 @@ describe("extension release variants", () => {
       "utf8",
     );
     expect(installerSupport).toContain(releasePublicKeyRawBase64);
+  });
+});
+
+describe("macOS release argument policy", () => {
+  it("requires both Developer ID and notarization credentials for publishable builds", () => {
+    expect(() => validateReleaseArgumentPolicy(parseArguments([]))).toThrow("--sign-identity");
+    expect(() => validateReleaseArgumentPolicy(parseArguments([
+      "--sign-identity", "Developer ID Application: Fixture",
+    ]))).toThrow("--notary-profile");
+    expect(() => validateReleaseArgumentPolicy(parseArguments([
+      "--sign-identity", " ",
+      "--notary-profile", " ",
+    ]))).toThrow("--sign-identity");
+    expect(() => validateReleaseArgumentPolicy(parseArguments([
+      "--sign-identity", "Developer ID Application: Fixture",
+      "--notary-profile", "media-sniper-notary",
+    ]))).not.toThrow();
+    expect(() => validateReleaseArgumentPolicy(parseArguments(["--development"]))).not.toThrow();
   });
 });
 

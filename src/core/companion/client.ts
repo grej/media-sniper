@@ -1,5 +1,6 @@
 import {
   createCompanionEnvelope,
+  validateCompanionRequest,
   validateCompanionEvent,
   type CompanionEnvelope,
   type CompanionEvent,
@@ -105,9 +106,12 @@ export class CompanionClient {
     payload: T,
     timeoutMs = 30_000,
   ): Promise<CompanionEvent> {
-    this.connect();
     const requestId = `${Date.now().toString(36)}-${(++this.requestCounter).toString(36)}-${crypto.randomUUID()}`;
     const envelope = createCompanionEnvelope(type, requestId, payload);
+    if (!validateCompanionRequest(envelope)) {
+      throw new CompanionClientError("INVALID_REQUEST", "The companion request was invalid.", false);
+    }
+    this.connect();
 
     return await new Promise<CompanionEvent>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -131,9 +135,13 @@ export class CompanionClient {
   }
 
   post<T extends Record<string, unknown>>(type: string, payload: T): string {
-    this.connect();
     const requestId = `${Date.now().toString(36)}-${(++this.requestCounter).toString(36)}-${crypto.randomUUID()}`;
-    this.port!.postMessage(createCompanionEnvelope(type, requestId, payload));
+    const envelope = createCompanionEnvelope(type, requestId, payload);
+    if (!validateCompanionRequest(envelope)) {
+      throw new CompanionClientError("INVALID_REQUEST", "The companion request was invalid.", false);
+    }
+    this.connect();
+    this.port!.postMessage(envelope);
     return requestId;
   }
 

@@ -17,10 +17,15 @@ struct Harness {
     events: Arc<Mutex<Vec<Envelope>>>,
     jobs: std::path::PathBuf,
     output: std::path::PathBuf,
+    tools: std::path::PathBuf,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_probe_timeout(Duration::from_secs(2))
+    }
+
+    fn with_probe_timeout(probe_timeout: Duration) -> Self {
         let root = tempfile::tempdir().unwrap();
         let tools = root.path().join("tools");
         fs::create_dir_all(&tools).unwrap();
@@ -37,6 +42,15 @@ impl Harness {
         let app = root.path().join("app");
         let jobs = app.join("jobs");
         let output = root.path().join("Downloads/Media Sniper");
+        let user_home = root.path().join("home");
+        let brave_root = if cfg!(target_os = "macos") {
+            user_home.join("Library/Application Support/BraveSoftware/Brave-Browser")
+        } else if cfg!(windows) {
+            user_home.join("AppData/Local/BraveSoftware/Brave-Browser/User Data")
+        } else {
+            user_home.join(".config/BraveSoftware/Brave-Browser")
+        };
+        fs::create_dir_all(brave_root.join("Default")).unwrap();
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink: EventSink = {
             let events = events.clone();
@@ -45,11 +59,12 @@ impl Harness {
         let host = Host::new(
             CompanionConfig {
                 app_root: app.clone(),
-                user_home: root.path().join("home"),
+                user_home,
                 temp_root: jobs.clone(),
                 output_root: output.clone(),
                 developer_mode: true,
-                developer_tool_dir: Some(tools),
+                developer_tool_dir: Some(tools.clone()),
+                probe_timeout,
             },
             sink,
         )
@@ -60,6 +75,7 @@ impl Harness {
             events,
             jobs,
             output,
+            tools,
         }
     }
 
@@ -98,6 +114,18 @@ impl Harness {
             .unwrap()
             .to_owned()
     }
+}
+
+fn current_tab_auth(url: &str) -> Value {
+    json!({
+        "mode":"current-tab", "pageUrl":url, "referer":url,
+        "userAgent":"Brave fixture", "cookieStoreId":"1", "incognito":false,
+        "cookies":[{
+            "name":"session-name-secret", "value":"cookie-value-secret",
+            "domain":".youtube.com", "path":"/", "secure":true,
+            "httpOnly":true, "sameSite":"lax", "hostOnly":false, "session":true
+        }]
+    })
 }
 
 #[test]
@@ -196,6 +224,105 @@ fn current_tab_cookie_secret_is_ephemeral_and_never_emitted() {
     let events = serde_json::to_string(&*harness.events.lock().unwrap()).unwrap();
     assert!(!events.contains("session-name-secret"));
     assert!(!events.contains("cookie-value-secret"));
+}
+
+#[test]
+fn canonicalized_youtube_url_keeps_download_clip_and_auth_bound_to_requested_page() {
+    let mut harness = Harness::new();
+    let requested = "https://www.youtube.com/watch?v=id&t=30s";
+    let canonical = "https://www.youtube.com/watch?v=id";
+    let token = harness.probe(requested, current_tab_auth(requested));
+    let summary = harness.wait("probe_result", None);
+    assert_eq!(summary["webpageUrl"], canonical);
+
+    harness.send(
+        "canonical-download",
+        "start_download",
+        json!({
+            "jobId":"canonical-download", "probeToken":token, "selectionKey":"best",
+            "auth":current_tab_auth(requested)
+        }),
+    );
+    harness.wait("job_completed", Some("canonical-download"));
+
+    harness.send(
+        "canonical-clip",
+        "start_clip",
+        json!({
+            "jobId":"canonical-clip", "probeToken":token, "selectionKey":"best",
+            "clip":{"startMs":0,"endMs":10000,"mode":"fast"},
+            "allowFullDownloadFallback":false, "auth":current_tab_auth(requested)
+        }),
+    );
+    harness.wait("job_completed", Some("canonical-clip"));
+
+    let different = "https://www.youtube.com/watch?v=other";
+    harness.send(
+        "wrong-page",
+        "start_download",
+        json!({
+            "jobId":"wrong-page", "probeToken":token, "selectionKey":"best",
+            "auth":current_tab_auth(different)
+        }),
+    );
+    let failed = harness.wait("job_failed", None);
+    assert_eq!(failed["code"], "INVALID_REQUEST");
+}
+
+#[test]
+fn probe_timeout_terminates_tool_and_removes_scoped_cookie_temp() {
+    let mut harness = Harness::with_probe_timeout(Duration::from_millis(100));
+    let url = "https://www.youtube.com/probe-stall?v=id";
+    let started = Instant::now();
+    harness.send(
+        "stalled-probe",
+        "probe",
+        json!({"pageUrl":url,"auth":current_tab_auth(url)}),
+    );
+    let failed = harness.wait("job_failed", None);
+    assert_eq!(failed["code"], "JOB_INTERRUPTED");
+    assert!(started.elapsed() < Duration::from_secs(3));
+    wait_for_empty(&harness.jobs);
+    let events = serde_json::to_string(&*harness.events.lock().unwrap()).unwrap();
+    assert!(!events.contains("session-name-secret"));
+    assert!(!events.contains("cookie-value-secret"));
+}
+
+#[test]
+fn oversized_single_probe_line_is_rejected_and_cleaned() {
+    let mut harness = Harness::new();
+    harness.send(
+        "oversized-probe",
+        "probe",
+        json!({"pageUrl":"https://example.com/oversized-probe","auth":{"mode":"anonymous"}}),
+    );
+    let failed = harness.wait("job_failed", None);
+    assert_eq!(failed["code"], "TOOLS_INCOMPATIBLE");
+    wait_for_empty(&harness.jobs);
+}
+
+#[test]
+fn brave_profile_exposes_only_managed_and_reviewed_macos_system_paths() {
+    let mut harness = Harness::new();
+    harness.send(
+        "profile-env",
+        "probe",
+        json!({
+            "pageUrl":"https://example.com/profile-env",
+            "auth":{"mode":"brave-profile","profileId":"Default"}
+        }),
+    );
+    let result = harness.wait("probe_result", None);
+    let path = result["title"].as_str().unwrap();
+    let canonical_tools = fs::canonicalize(&harness.tools).unwrap();
+    assert!(
+        path.starts_with(canonical_tools.to_string_lossy().as_ref()),
+        "unexpected controlled PATH: {path}"
+    );
+    #[cfg(target_os = "macos")]
+    assert_eq!(path, format!("{}:/usr/bin:/bin", canonical_tools.display()));
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(path, canonical_tools.to_string_lossy());
 }
 
 #[test]

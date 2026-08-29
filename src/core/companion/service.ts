@@ -40,6 +40,8 @@ interface StartClipPayload extends StartPayload {
 
 const client = new CompanionClient();
 const summaries = new Map<string, YtDlpMediaSummary>();
+export interface AnalyzedPageBinding { tabId: number; requestedPageUrl: string }
+const analyzedPages = new Map<string, AnalyzedPageBinding>();
 let health: CompanionHealth | null = null;
 let registered = false;
 
@@ -76,6 +78,40 @@ export function validatePublicPageUrl(raw: string): URL {
     /^198\.1[89]\./.test(host)
   ) throw companionError("URL_UNSUPPORTED", "Local and private network pages are disabled.");
   return url;
+}
+
+/** Preserve the analyzed page query while ignoring an in-page fragment. */
+export function analyzedPageIdentity(raw: string): string {
+  const url = validatePublicPageUrl(raw);
+  url.hash = "";
+  return url.toString();
+}
+
+export function validateAnalyzedPageBinding(
+  activeTab: Pick<chrome.tabs.Tab, "id" | "url">,
+  binding: AnalyzedPageBinding,
+): void {
+  if (activeTab.id !== binding.tabId || !activeTab.url ||
+      analyzedPageIdentity(activeTab.url) !== binding.requestedPageUrl) {
+    throw companionError("INVALID_REQUEST", "Analyze the active page again before continuing.");
+  }
+}
+
+export function shouldInvalidateAnalyzedPage(
+  binding: AnalyzedPageBinding,
+  changedTabId: number,
+  changedUrl: string | undefined,
+): boolean {
+  return changedUrl !== undefined && binding.tabId === changedTabId;
+}
+
+function clearAnalysesForTab(tabId: number, changedUrl = "closed"): void {
+  for (const [token, binding] of analyzedPages) {
+    if (shouldInvalidateAnalyzedPage(binding, tabId, changedUrl)) {
+      analyzedPages.delete(token);
+      summaries.delete(token);
+    }
+  }
 }
 
 async function activeHttpTab(): Promise<chrome.tabs.Tab> {
@@ -238,8 +274,30 @@ async function checkHealth(): Promise<CompanionHealth> {
   return health;
 }
 
+async function stateForActiveTab(): Promise<{ health: CompanionHealth | null; summaries: YtDlpMediaSummary[] }> {
+  try {
+    const tab = await activeHttpTab();
+    const activeSummaries = [...summaries.entries()]
+      .filter(([token]) => {
+        const binding = analyzedPages.get(token);
+        if (!binding) return false;
+        try {
+          validateAnalyzedPageBinding(tab, binding);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .map(([, summary]) => summary);
+    return { health, summaries: activeSummaries };
+  } catch {
+    return { health, summaries: [] };
+  }
+}
+
 async function probe(choice: AuthChoice): Promise<YtDlpMediaSummary> {
   const tab = await activeHttpTab();
+  const requestedPageUrl = analyzedPageIdentity(tab.url!);
   let auth = await authBundle(choice, tab);
   try {
     const event = await client.request("probe", { pageUrl: tab.url!, auth }, 90_000);
@@ -249,7 +307,11 @@ async function probe(choice: AuthChoice): Promise<YtDlpMediaSummary> {
     if (summary.webpageUrl !== tab.url && new URL(summary.webpageUrl).origin !== new URL(tab.url!).origin) {
       throw companionError("INVALID_REQUEST", "The analysis result did not match the active page.");
     }
-    summaries.clear(); summaries.set(summary.probeToken, summary);
+    // Replace only this tab's prior analysis. A probe in another tab must not
+    // invalidate a still-current page binding.
+    clearAnalysesForTab(tab.id!);
+    summaries.set(summary.probeToken, summary);
+    analyzedPages.set(summary.probeToken, { tabId: tab.id!, requestedPageUrl });
     return summary;
   } finally { auth = { mode: "anonymous" }; }
 }
@@ -259,7 +321,9 @@ async function startDownload(payload: StartPayload): Promise<{ jobId: string }> 
   if (!summary) throw companionError("FORMAT_UNAVAILABLE", "This analysis expired. Analyze the page again.");
   selectedOption(summary, payload.selectionKey);
   const tab = await activeHttpTab();
-  if (tab.url !== summary.webpageUrl) throw companionError("INVALID_REQUEST", "Analyze the active page again before downloading.");
+  const binding = analyzedPages.get(payload.probeToken);
+  if (!binding) throw companionError("FORMAT_UNAVAILABLE", "This analysis expired. Analyze the page again.");
+  validateAnalyzedPageBinding(tab, binding);
   const jobId = crypto.randomUUID();
   await createCompanionJobState(jobId, summary, payload.selectionKey, "download");
   let auth = await authBundle(payload, tab);
@@ -280,7 +344,9 @@ async function startClip(payload: StartClipPayload): Promise<{ jobId: string }> 
   if (summary.isDrm) throw companionError("DRM_UNSUPPORTED", "DRM-protected media cannot be clipped.");
   selectedOption(summary, payload.selectionKey);
   const tab = await activeHttpTab();
-  if (tab.url !== summary.webpageUrl) throw companionError("INVALID_REQUEST", "Analyze the active page again before clipping.");
+  const binding = analyzedPages.get(payload.probeToken);
+  if (!binding) throw companionError("FORMAT_UNAVAILABLE", "This analysis expired. Analyze the page again.");
+  validateAnalyzedPageBinding(tab, binding);
   const jobId = payload.resumeJobId ?? crypto.randomUUID();
   const clip = { startMs: payload.startMs, endMs: payload.endMs, mode: payload.mode };
   if (payload.resumeJobId) {
@@ -315,7 +381,7 @@ async function outputAction(type: "reveal_output" | "open_output", id: string): 
 async function dispatch(message: { type?: string; payload?: Record<string, unknown> }): Promise<unknown> {
   switch (message.type) {
     case CompanionUiMessage.HEALTH: return await checkHealth();
-    case CompanionUiMessage.GET_STATE: return { health, summaries: [...summaries.values()] };
+    case CompanionUiMessage.GET_STATE: return await stateForActiveTab();
     case CompanionUiMessage.PROBE: return await probe((message.payload ?? {}) as AuthChoice);
     case CompanionUiMessage.START_DOWNLOAD: return await startDownload(message.payload as unknown as StartPayload);
     case CompanionUiMessage.START_CLIP: return await startClip(message.payload as unknown as StartClipPayload);
@@ -333,9 +399,19 @@ export function registerCompanionService(): void {
   registered = true;
   client.subscribe((event) => void onCompanionEvent(event));
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    // This notification is consumed by extension views; it is not an action
+    // request for the background service itself.
+    if (message?.type === CompanionUiMessage.STATE_CHANGED) return false;
     if (typeof message?.type !== "string" || !message.type.startsWith("COMPANION_")) return false;
     dispatch(message).then((data) => sendResponse({ success: true, data })).catch((error) => sendResponse({ success: false, error: safeError(error) }));
     return true;
   });
-  chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => { if (changeInfo.url) summaries.clear(); });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => { if (changeInfo.url) clearAnalysesForTab(tabId, changeInfo.url); });
+  chrome.tabs.onRemoved.addListener((tabId) => clearAnalysesForTab(tabId));
+  chrome.tabs.onActivated.addListener(() => {
+    void chrome.runtime.sendMessage({
+      type: CompanionUiMessage.STATE_CHANGED,
+      payload: { activeTabChanged: true },
+    }).catch(() => undefined);
+  });
 }

@@ -10,11 +10,14 @@ remain graphical.
 - Build `standard` and `companion` Vite modes from clean output directories.
 - Confirm the standard manifest has neither a public key, `nativeMessaging`,
   nor optional `cookies`.
-- Byte-scan every standard executable bundle and textual package entry for
-  `nativeMessaging`, `cookies`, and `companion`. A manifest-only check is
-  insufficient. Opaque vendored WASM, image, and font payloads remain pinned by
-  dependency/package hashes; the reviewed browser FFmpeg WASM contains an
-  unrelated libcurl cookie diagnostic and is not parsed as extension source.
+- Case-insensitively byte-scan every standard executable bundle and textual
+  package entry for the full reviewed marker set, including `companion`,
+  `COMPANION_`, native-messaging spellings, `connectNative`, `sendNativeMessage`,
+  `cookies`, `yt-dlp`, the native-host name, and the companion extension ID. A
+  manifest-only check is insufficient. Opaque vendored WASM, image, and font
+  payloads remain pinned by dependency/package hashes; the reviewed browser
+  FFmpeg WASM contains an unrelated libcurl cookie diagnostic and is not parsed
+  as extension source.
 - Confirm the companion key derives
   `dioapemglpdpmfmoekckbpenmpdgkofp` and that its optional cookie permission is
   requested only from a user gesture.
@@ -23,10 +26,18 @@ remain graphical.
 
 ## Native and managed-tool release
 
-- Build the Rust host for macOS arm64 and x86_64 with locked dependencies.
+- Require CI to run locked Rust formatting, Clippy with warnings denied, unit
+  tests, and the fake-tool integration feature. Build the Rust host for macOS
+  arm64 and x86_64 with locked dependencies. Swift/AppKit compilation remains a
+  macOS release gate because the primary CI verification job runs on Ubuntu.
 - Assemble reviewed yt-dlp, FFmpeg, ffprobe, and Deno payloads. Record exact
   versions, upstream source URLs, FFmpeg configuration, licenses, and source
   offer where required.
+- Developer ID-sign the native host and each managed executable (`yt-dlp`,
+  `ffmpeg`, `ffprobe`, and `deno`) individually before generating the signed
+  tool manifest. Signing afterward changes the hashed bytes and invalidates the
+  release. The production DMG builder rejects missing or ad-hoc payload
+  signatures before packaging.
 - Require a pinned official yt-dlp executable whose signed provenance records
   the matching embedded yt-dlp-ejs version and binary hash. Reject Deno older
   than 2.3.0, a missing solver attestation, or any release that permits remote
@@ -38,8 +49,10 @@ remain graphical.
 - Confirm custody of the private key matching the pinned public key under the
   process in [Managed-tool release key](release-key-provisioning.md). Public
   metadata alone is not evidence that the release can be signed.
-- Build the installer and uninstaller apps, sign them with Developer ID,
-  notarize the disk image, staple the ticket, and verify Gatekeeper assessment.
+- Build the installer and uninstaller apps with both `--sign-identity` and
+  `--notary-profile`. Production output is refused unless notarization succeeds
+  and the stapled ticket validates. `--development` produces a distinctly named
+  non-publishable DMG and keeps local fixture builds workable.
 - Inspect the installed Brave and Chrome manifests. Each must contain the
   current user's absolute host path and the one exact allowed extension origin.
 - Exercise an update to a new versioned tool directory, a failed health check,

@@ -2,8 +2,11 @@ use crate::auth::{redact_auth_diagnostic, PreparedAuth};
 use crate::protocol::{
     AuthRequest, ErrorCode, HostError, MediaSummary, ProbeRequest, SelectionOption,
 };
-use crate::runner::{ManagedTool, ProcessRunner};
-use crate::security::{bounded_text, create_private_dir, opaque_token, validate_public_page_url};
+use crate::runner::{ManagedTool, ProcessRunner, RunPolicy};
+use crate::security::{
+    bounded_text, create_private_dir, opaque_token, validate_public_page_url,
+    validate_resolved_public_page_url,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -28,6 +31,9 @@ pub struct CachedSelection {
 #[derive(Debug, Clone)]
 pub struct ProbeRecord {
     pub token: String,
+    /// Original active-page identity, preserving its query and omitting only the fragment.
+    pub requested_page_url: String,
+    /// Extractor-canonical URL used for yt-dlp execution and output identity.
     pub page_url: String,
     pub extractor_key: String,
     pub media_id: String,
@@ -72,7 +78,8 @@ impl ProbeCache {
     }
 
     pub fn invalidate_page(&mut self, page_url: &str) {
-        self.records.retain(|_, record| record.page_url == page_url);
+        self.records
+            .retain(|_, record| record.requested_page_url == page_url);
     }
 
     fn purge_expired(&mut self) {
@@ -93,6 +100,7 @@ pub fn probe(
     brave_profiles: &[String],
     developer_mode: bool,
     cancelled: &Arc<AtomicBool>,
+    timeout: Duration,
 ) -> Result<(MediaSummary, ProbeRecord), HostError> {
     let page_url = validate_public_page_url(&request.page_url, developer_mode)?;
     validate_auth_page(&request.auth, page_url.as_str(), developer_mode)?;
@@ -118,16 +126,20 @@ pub fn probe(
     args.extend(prepared_auth.args.iter().cloned());
     args.push("--".to_owned());
     args.push(page_url.to_string());
+    validate_resolved_public_page_url(&page_url, developer_mode)?;
     let output = runner.run(
         ManagedTool::YtDlp,
         &args,
         temp.path(),
-        matches!(request.auth, AuthRequest::BraveProfile { .. }),
+        RunPolicy::probe(
+            matches!(request.auth, AuthRequest::BraveProfile { .. }),
+            timeout,
+        ),
         cancelled,
         |_| {},
     )?;
     if !output.status.success() {
-        return Err(classify_probe_failure(&request.auth, &output.safe_stderr));
+        return Err(classify_probe_failure(&request.auth, &output.stderr));
     }
     let raw = output.stdout_lines.join("\n");
     if raw.len() > MAX_RAW_PROBE_BYTES {
@@ -162,7 +174,7 @@ pub fn probe(
         }
         value = entries.pop().unwrap();
     }
-    normalize_probe(value, page_url.to_string(), developer_mode)
+    normalize_probe(value, canonical_page_identity(&page_url), developer_mode)
 }
 
 fn managed_js_runtime_arg(runner: &ProcessRunner) -> Result<String, HostError> {
@@ -215,7 +227,7 @@ fn normalize_probe(
         .and_then(Value::as_str)
         .and_then(|url| validate_public_page_url(url, developer_mode).ok())
         .map(|url| url.to_string())
-        .unwrap_or(requested_url);
+        .unwrap_or_else(|| requested_url.clone());
     let duration_ms = finite_nonnegative(object.get("duration"))
         .map(|duration| (duration * 1000.0).round())
         .filter(|duration| *duration <= u64::MAX as f64)
@@ -280,6 +292,7 @@ fn normalize_probe(
     };
     let record = ProbeRecord {
         token,
+        requested_page_url: requested_url,
         page_url: webpage_url,
         extractor_key,
         media_id,

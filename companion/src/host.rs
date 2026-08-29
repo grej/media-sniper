@@ -30,6 +30,7 @@ pub struct CompanionConfig {
     pub output_root: PathBuf,
     pub developer_mode: bool,
     pub developer_tool_dir: Option<PathBuf>,
+    pub probe_timeout: Duration,
 }
 
 impl CompanionConfig {
@@ -64,6 +65,7 @@ impl CompanionConfig {
             user_home,
             developer_mode,
             developer_tool_dir,
+            probe_timeout: Duration::from_secs(75),
         })
     }
 
@@ -371,11 +373,12 @@ impl Host {
             &ids,
             self.config.developer_mode,
             &cancelled,
+            self.config.probe_timeout,
         );
         self.cancellations.lock().unwrap().remove(&cancel_key);
         let (summary, record) = result?;
         let mut probes = self.probes.lock().unwrap();
-        probes.invalidate_page(&record.page_url);
+        probes.invalidate_page(&record.requested_page_url);
         probes.insert(record);
         emit(&self.sink, &envelope.request_id, "probe_result", summary);
         Ok(())

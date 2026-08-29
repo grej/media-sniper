@@ -13,6 +13,12 @@ explicit release-secret input, is never copied into a build directory, and
 must never appear in repository files, logs, CI artifacts, diagnostics, or a
 developer tool bundle.
 
+Developer ID-sign the native host and every executable in the managed payload
+before the Ed25519 manifest is generated. The manifest therefore authenticates
+the exact signed bytes; re-signing a payload after hashing is prohibited. The
+production release builder independently verifies each Developer ID signature
+before it accepts the manifest and submits the containing DMG for notarization.
+
 The checked-in public key establishes the expected first-release identity; the
 release owner must confirm custody of its matching private key before signing.
 If that custody has not been established, rotate the public key in a reviewed

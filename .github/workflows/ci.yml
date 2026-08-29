@@ -23,3 +23,22 @@ jobs:
       - run: npm run test:e2e
       - run: npm run package
       - run: npm run package:check
+
+  rust-companion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: companion
+      - name: Fetch locked Rust dependencies
+        run: cargo fetch --locked --manifest-path companion/Cargo.toml
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path companion/Cargo.toml --all -- --check
+      - name: Lint Rust companion
+        run: cargo clippy --locked --manifest-path companion/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Test Rust companion and fake-tool integration
+        run: cargo test --locked --manifest-path companion/Cargo.toml --all-targets --all-features

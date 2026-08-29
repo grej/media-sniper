@@ -118,4 +118,15 @@ describe("operation key", () => {
       TypeError,
     );
   });
+
+  it("uses a new canonical version for backend-discriminated identities", () => {
+    const browser = createOperationKey({
+      backend: "browser", url: "https://example.com/watch", kind: "download",
+    });
+    const companion = createOperationKey({
+      backend: "yt-dlp", url: "https://example.com/watch", kind: "download",
+    });
+    expect(browser).toContain('"version":2');
+    expect(companion).not.toBe(browser);
+  });
 });

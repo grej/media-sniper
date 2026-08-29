@@ -36,7 +36,7 @@ describe("CompanionClient", () => {
       type: "hello_result",
       payload: {
         protocolVersion: 1, companionVersion: "1.0.0", browserTarget: "brave", platform: "macos",
-        healthy: true, issues: [], capabilities: {
+        healthy: true, issues: [], braveProfiles: [], capabilities: {
           probe: true, download: true, sectionDownload: true, exactClip: true,
           currentTabCookies: true, braveProfileCookies: true, revealOutput: true,
         },
@@ -66,5 +66,28 @@ describe("CompanionClient", () => {
   it("normalizes a synchronous native connection failure", async () => {
     const client = new CompanionClient(() => { throw new Error("host missing"); });
     await expect(client.hello("brave")).rejects.toMatchObject({ code: "COMPANION_NOT_INSTALLED" });
+  });
+
+  it("rejects invalid outbound payloads before opening or posting to a native port", async () => {
+    const port = new FakePort();
+    const connect = vi.fn(() => port);
+    const client = new CompanionClient(connect);
+    await expect(client.request("probe", {
+      pageUrl: "https://example.test/watch",
+      auth: {
+        mode: "current-tab",
+        pageUrl: "https://example.test/watch",
+        referer: "https://example.test/watch",
+        userAgent: "Brave",
+        cookieStoreId: "0",
+        incognito: false,
+        cookies: [{
+          name: "x".repeat(257), value: "secret", domain: ".example.test", path: "/",
+          secure: true, httpOnly: true, sameSite: "lax", hostOnly: false, session: true,
+        }],
+      },
+    })).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(connect).not.toHaveBeenCalled();
+    expect(port.messages).toHaveLength(0);
   });
 });

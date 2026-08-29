@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { collectCurrentTabAuth, createCompanionJobState, validatePublicPageUrl } from "@/core/companion/service";
+import {
+  analyzedPageIdentity,
+  collectCurrentTabAuth,
+  createCompanionJobState,
+  shouldInvalidateAnalyzedPage,
+  validateAnalyzedPageBinding,
+  validatePublicPageUrl,
+} from "@/core/companion/service";
 import { getDownload } from "@/core/database/downloads";
 
 describe("companion page boundary", () => {
@@ -27,6 +34,20 @@ describe("companion page boundary", () => {
   it("accepts public HTTP(S) URLs including option-looking paths", () => {
     expect(validatePublicPageUrl("https://example.test/--exec?token=secret").protocol).toBe("https:");
     expect(validatePublicPageUrl("http://example.test/watch").protocol).toBe("http:");
+  });
+
+  it("binds starts to the originally analyzed page rather than the extractor's canonical URL", () => {
+    const requested = "https://www.youtube.com/watch?v=id&t=30s#chapter";
+    const canonical = "https://www.youtube.com/watch?v=id";
+    const binding = { tabId: 7, requestedPageUrl: analyzedPageIdentity(requested) };
+    expect(analyzedPageIdentity(requested)).toBe("https://www.youtube.com/watch?v=id&t=30s");
+    expect(() => validateAnalyzedPageBinding({ id: 7, url: requested }, binding)).not.toThrow();
+    expect(() => validateAnalyzedPageBinding({ id: 7, url: "https://www.youtube.com/watch?v=id&t=30s#other" }, binding)).not.toThrow();
+    expect(() => validateAnalyzedPageBinding({ id: 7, url: canonical }, binding)).toThrow();
+    expect(() => validateAnalyzedPageBinding({ id: 7, url: "https://www.youtube.com/watch?v=other" }, binding)).toThrow();
+    expect(() => validateAnalyzedPageBinding({ id: 8, url: requested }, binding)).toThrow();
+    expect(shouldInvalidateAnalyzedPage(binding, 8, "https://other.test/")).toBe(false);
+    expect(shouldInvalidateAnalyzedPage(binding, 7, "https://www.youtube.com/watch?v=other")).toBe(true);
   });
 });
 

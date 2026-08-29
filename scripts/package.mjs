@@ -19,6 +19,7 @@ import {
   COMPANION_MANIFEST_KEY,
   extensionIdFromManifestKey,
 } from "../build/extension-variants.mjs";
+import { validateStandardArtifactContents } from "./extension-isolation.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const artifactsDirectory = join(projectRoot, "artifacts");
@@ -240,24 +241,9 @@ function validateArchiveEntries(entries) {
   validateArtifactContents(entries, "release ZIP");
 }
 
-const STANDARD_FORBIDDEN_TOKENS = ["nativeMessaging", "cookies", "companion"];
-
 function validateArtifactContents(entries, label) {
   if (variant !== "standard") return;
-  for (const entry of entries) {
-    // Scan every executable bundle and textual resource. Browser FFmpeg's
-    // reviewed WASM includes an unrelated libcurl "cookies" diagnostic, so
-    // opaque binary payloads are covered by their pinned dependency hash
-    // rather than treated as extension-feature evidence.
-    if (/\.(?:wasm|png|woff2)$/i.test(entry.name)) continue;
-    for (const token of STANDARD_FORBIDDEN_TOKENS) {
-      if (entry.contents.includes(Buffer.from(token, "utf8"))) {
-        throw new Error(
-          `Standard ${label} contains forbidden token ${JSON.stringify(token)} in ${entry.name}`,
-        );
-      }
-    }
-  }
+  validateStandardArtifactContents(entries, label);
 }
 
 async function validateBuild() {

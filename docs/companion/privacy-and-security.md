@@ -16,7 +16,11 @@ boundary to explicit extension actions and companion-owned locations.
   Cookie values are never placed in process arguments or global request
   headers.
 - Brave-profile access is an explicitly disclosed advanced fallback. It can
-  expose cookies across related domains and may cause a Keychain prompt.
+  expose cookies across related domains and may cause a Keychain prompt. On
+  macOS only, that mode gives yt-dlp a fixed search path containing the managed
+  tool directory plus `/usr/bin` and `/bin`, because Chromium cookie decryption
+  calls the system `security` Keychain client. Anonymous and current-tab work
+  retain the managed-tool-only path; the caller's environment is never restored.
 
 Job-specific cookie jars and temporary directories use current-user-only
 permissions and are removed on success, failure, cancellation, timeout, and
@@ -37,6 +41,13 @@ job directory, and only the completed file is atomically moved under
 **Downloads/Media Sniper**. The extension receives a bounded completion
 receipt, not the file contents.
 
+Before every production yt-dlp launch, the host resolves the initial page name
+and rejects empty, mixed, loopback, link-local, or private DNS answers. This
+closes split-horizon and simple rebinding paths at launch time. Redirect-time
+address confinement inside the managed yt-dlp transport remains a release
+security consideration: acceptance must test redirect behavior, and the
+managed runtime must remain patched and tightly configured.
+
 ## Installation and updates
 
 The companion extension has a checked public manifest key and the stable ID
@@ -54,7 +65,9 @@ pinned official yt-dlp executable, and production explicitly disables remote
 component downloads from npm and GitHub.
 
 The standard Web Store candidate is compiled separately. Its release check
-rejects the strings `nativeMessaging`, `cookies`, and `companion` in emitted
-JavaScript and textual resources, in addition to inspecting manifest
-permissions. Opaque vendored WASM, images, and fonts are checked as pinned
-binary dependencies rather than searched for unrelated diagnostic words.
+case-insensitively rejects generic and concrete companion identifiers—including
+native-messaging APIs, the host name, stable extension ID, `COMPANION_` message
+names, `yt-dlp`, and cookie permission markers—in emitted JavaScript and textual
+resources, in addition to inspecting manifest permissions. Opaque vendored
+WASM, images, and fonts are checked as pinned binary dependencies rather than
+searched for unrelated diagnostic words.

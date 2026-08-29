@@ -34,6 +34,13 @@ fn main() {
 fn fake_ytdlp(args: &[String]) {
     let url = args.last().cloned().unwrap_or_default();
     if args.iter().any(|arg| arg == "--dump-single-json") {
+        if url.contains("/probe-stall") {
+            thread::sleep(Duration::from_secs(5));
+        }
+        if url.contains("/oversized-probe") {
+            println!("{}", "x".repeat(8 * 1024 * 1024 + 1));
+            return;
+        }
         if url.contains("/auth")
             && !args
                 .iter()
@@ -49,13 +56,23 @@ fn fake_ytdlp(args: &[String]) {
             );
             return;
         }
+        let webpage_url = if url == "https://www.youtube.com/watch?v=id&t=30s" {
+            "https://www.youtube.com/watch?v=id".to_owned()
+        } else {
+            url.clone()
+        };
+        let title = if url.contains("/profile-env") {
+            std::env::var("PATH").unwrap_or_default()
+        } else {
+            "Fixture ../ media".to_owned()
+        };
         println!(
             "{}",
             json!({
                 "extractor_key": "Fake",
                 "id": "fixture-id",
-                "title": "Fixture ../ media",
-                "webpage_url": url,
+                "title": title,
+                "webpage_url": webpage_url,
                 "duration": 60.0,
                 "thumbnail": "https://images.example.test/thumb.jpg?signature=secret",
                 "formats": [{"format_id":"unsafe --exec", "url":"https://signed.example.test/v?token=secret", "filesize":4096}]

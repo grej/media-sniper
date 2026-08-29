@@ -7,7 +7,7 @@
   "required": ["protocolVersion", "requestId", "type", "payload"],
   "properties": {
     "protocolVersion": { "const": 1 },
-    "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "requestId": { "$ref": "#/$defs/id" },
     "type": {
       "enum": [
         "hello", "probe", "start_download", "start_clip", "cancel_job",
@@ -20,65 +20,61 @@
     "payload": { "type": "object" }
   },
   "allOf": [
-    {
-      "if": { "properties": { "type": { "const": "hello" } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/hello" } } }
-    },
-    {
-      "if": { "properties": { "type": { "const": "probe" } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/probe" } } }
-    },
-    {
-      "if": { "properties": { "type": { "const": "start_download" } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/startDownload" } } }
-    },
-    {
-      "if": { "properties": { "type": { "const": "start_clip" } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/startClip" } } }
-    },
-    {
-      "if": { "properties": { "type": { "enum": ["cancel_job"] } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/jobRef" } } }
-    },
-    {
-      "if": { "properties": { "type": { "enum": ["reveal_output", "open_output"] } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/outputRef" } } }
-    },
-    {
-      "if": { "properties": { "type": { "const": "probe_result" } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/summary" } } }
-    },
-    {
-      "if": { "properties": { "type": { "const": "job_progress" } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/progress" } } }
-    },
-    {
-      "if": { "properties": { "type": { "enum": ["job_failed", "auth_required"] } } },
-      "then": { "properties": { "payload": { "$ref": "#/$defs/failure" } } }
-    }
+    { "if": { "properties": { "type": { "const": "hello" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/hello" } } } },
+    { "if": { "properties": { "type": { "const": "probe" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/probe" } } } },
+    { "if": { "properties": { "type": { "const": "start_download" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/startDownload" } } } },
+    { "if": { "properties": { "type": { "const": "start_clip" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/startClip" } } } },
+    { "if": { "properties": { "type": { "const": "cancel_job" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/jobRef" } } } },
+    { "if": { "properties": { "type": { "enum": ["reveal_output", "open_output"] } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/outputRef" } } } },
+    { "if": { "properties": { "type": { "enum": ["install_tools", "update_tools"] } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/empty" } } } },
+    { "if": { "properties": { "type": { "const": "hello_result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/health" } } } },
+    { "if": { "properties": { "type": { "const": "probe_result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/summary" } } } },
+    { "if": { "properties": { "type": { "enum": ["auth_required", "job_failed"] } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/failure" } } } },
+    { "if": { "properties": { "type": { "const": "job_queued" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/queued" } } } },
+    { "if": { "properties": { "type": { "const": "job_progress" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/progress" } } } },
+    { "if": { "properties": { "type": { "const": "fallback_required" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/fallback" } } } },
+    { "if": { "properties": { "type": { "const": "job_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/completed" } } } },
+    { "if": { "properties": { "type": { "const": "job_cancelled" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/jobRef" } } } },
+    { "if": { "properties": { "type": { "const": "tool_progress" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/toolProgress" } } } }
   ],
   "$defs": {
-    "safeString": { "type": "string", "maxLength": 4096 },
-    "httpUrl": { "type": "string", "maxLength": 8192, "pattern": "^https?://" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "token": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "httpUrl": { "type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^[hH][tT][tT][pP][sS]?://" },
+    "errorCode": {
+      "enum": [
+        "COMPANION_NOT_INSTALLED", "COMPANION_INCOMPATIBLE", "TOOLS_MISSING",
+        "TOOLS_INCOMPATIBLE", "PROTOCOL_MISMATCH", "URL_UNSUPPORTED",
+        "PLAYLIST_UNSUPPORTED", "LIVE_UNSUPPORTED", "DRM_UNSUPPORTED",
+        "AUTH_REQUIRED", "AUTH_SCOPE_INSUFFICIENT", "COOKIE_PERMISSION_DENIED",
+        "FORMAT_UNAVAILABLE", "SECTION_UNSUPPORTED", "EXACT_CLIP_UNSUPPORTED",
+        "OUTPUT_EXISTS", "DISK_FULL", "JOB_INTERRUPTED", "CANCELLED",
+        "INVALID_REQUEST", "INTERNAL_ERROR"
+      ]
+    },
+    "empty": { "type": "object", "additionalProperties": false, "maxProperties": 0 },
     "hello": {
       "type": "object", "additionalProperties": false,
       "required": ["browserTarget", "extensionVersion"],
       "properties": {
         "browserTarget": { "enum": ["brave", "chrome", "chromium", "unknown"] },
-        "extensionVersion": { "type": "string", "maxLength": 64 }
+        "extensionVersion": { "type": "string", "minLength": 1, "maxLength": 64 }
       }
     },
     "cookie": {
       "type": "object", "additionalProperties": false,
       "required": ["name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "hostOnly", "session"],
       "properties": {
-        "name": { "type": "string", "maxLength": 1024 },
+        "name": { "type": "string", "maxLength": 256 },
         "value": { "type": "string", "maxLength": 8192 },
-        "domain": { "type": "string", "maxLength": 1024 },
-        "path": { "type": "string", "maxLength": 2048 },
-        "secure": { "type": "boolean" }, "httpOnly": { "type": "boolean" },
+        "domain": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "secure": { "type": "boolean" },
+        "httpOnly": { "type": "boolean" },
         "sameSite": { "enum": ["no_restriction", "lax", "strict", "unspecified"] },
-        "expirationDate": { "type": "number" }, "hostOnly": { "type": "boolean" },
+        "expirationDate": { "type": "number", "minimum": 0 },
+        "hostOnly": { "type": "boolean" },
         "session": { "type": "boolean" }
       }
     },
@@ -89,13 +85,20 @@
           "type": "object", "additionalProperties": false,
           "required": ["mode", "pageUrl", "referer", "userAgent", "cookieStoreId", "incognito", "cookies"],
           "properties": {
-            "mode": { "const": "current-tab" }, "pageUrl": { "$ref": "#/$defs/httpUrl" },
-            "referer": { "$ref": "#/$defs/httpUrl" }, "userAgent": { "type": "string", "maxLength": 1024 },
-            "cookieStoreId": { "type": "string", "maxLength": 128 }, "incognito": { "type": "boolean" },
+            "mode": { "const": "current-tab" },
+            "pageUrl": { "$ref": "#/$defs/httpUrl" },
+            "referer": { "$ref": "#/$defs/httpUrl" },
+            "userAgent": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "cookieStoreId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "incognito": { "type": "boolean" },
             "cookies": { "type": "array", "maxItems": 2048, "items": { "$ref": "#/$defs/cookie" } }
           }
         },
-        { "type": "object", "additionalProperties": false, "required": ["mode", "profileId"], "properties": { "mode": { "const": "brave-profile" }, "profileId": { "type": "string", "maxLength": 128 } } }
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["mode", "profileId"],
+          "properties": { "mode": { "const": "brave-profile" }, "profileId": { "type": "string", "minLength": 1, "maxLength": 128 } }
+        }
       ]
     },
     "probe": {
@@ -105,30 +108,161 @@
     "startDownload": {
       "type": "object", "additionalProperties": false,
       "required": ["jobId", "probeToken", "selectionKey", "auth"],
-      "properties": { "jobId": { "$ref": "#/$defs/safeString" }, "probeToken": { "$ref": "#/$defs/safeString" }, "selectionKey": { "$ref": "#/$defs/safeString" }, "auth": { "$ref": "#/$defs/auth" } }
+      "properties": {
+        "jobId": { "$ref": "#/$defs/id" }, "probeToken": { "$ref": "#/$defs/token" },
+        "selectionKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "auth": { "$ref": "#/$defs/auth" }
+      }
     },
     "startClip": {
       "type": "object", "additionalProperties": false,
       "required": ["jobId", "probeToken", "selectionKey", "auth", "clip", "allowFullDownloadFallback"],
       "properties": {
-        "jobId": { "$ref": "#/$defs/safeString" }, "probeToken": { "$ref": "#/$defs/safeString" },
-        "selectionKey": { "$ref": "#/$defs/safeString" }, "auth": { "$ref": "#/$defs/auth" },
-        "clip": { "type": "object", "additionalProperties": false, "required": ["startMs", "endMs", "mode"], "properties": { "startMs": { "type": "integer", "minimum": 0 }, "endMs": { "type": "integer", "minimum": 1 }, "mode": { "enum": ["fast", "exact"] } } },
+        "jobId": { "$ref": "#/$defs/id" }, "probeToken": { "$ref": "#/$defs/token" },
+        "selectionKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "auth": { "$ref": "#/$defs/auth" },
+        "clip": {
+          "type": "object", "additionalProperties": false, "required": ["startMs", "endMs", "mode"],
+          "properties": {
+            "startMs": { "type": "integer", "minimum": 0 },
+            "endMs": { "type": "integer", "minimum": 1 },
+            "mode": { "enum": ["fast", "exact"] }
+          }
+        },
         "allowFullDownloadFallback": { "type": "boolean" }
       }
     },
-    "jobRef": { "type": "object", "additionalProperties": false, "required": ["jobId"], "properties": { "jobId": { "$ref": "#/$defs/safeString" } } },
-    "outputRef": { "type": "object", "additionalProperties": false, "required": ["outputToken"], "properties": { "outputToken": { "$ref": "#/$defs/safeString" } } },
+    "jobRef": { "type": "object", "additionalProperties": false, "required": ["jobId"], "properties": { "jobId": { "$ref": "#/$defs/id" } } },
+    "outputRef": { "type": "object", "additionalProperties": false, "required": ["outputToken"], "properties": { "outputToken": { "$ref": "#/$defs/token" } } },
+    "failure": {
+      "type": "object", "additionalProperties": false, "required": ["code", "message", "recoverable"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/id" }, "code": { "$ref": "#/$defs/errorCode" },
+        "message": { "$ref": "#/$defs/text" }, "recoverable": { "type": "boolean" }
+      }
+    },
+    "capabilities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["probe", "download", "sectionDownload", "exactClip", "currentTabCookies", "braveProfileCookies", "revealOutput"],
+      "properties": {
+        "probe": { "type": "boolean" }, "download": { "type": "boolean" },
+        "sectionDownload": { "type": "boolean" }, "exactClip": { "type": "boolean" },
+        "currentTabCookies": { "type": "boolean" }, "braveProfileCookies": { "type": "boolean" },
+        "revealOutput": { "type": "boolean" }
+      }
+    },
+    "health": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocolVersion", "companionVersion", "browserTarget", "platform", "healthy", "issues", "capabilities", "braveProfiles"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "companionVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "browserTarget": { "enum": ["brave", "chrome", "chromium", "unknown"] },
+        "platform": { "enum": ["macos", "windows", "linux"] },
+        "ytDlpVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ffmpegVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ffprobeVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "jsRuntime": {
+          "type": "object", "additionalProperties": false, "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "version": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "healthy": { "type": "boolean" },
+        "issues": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/failure" } },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "braveProfiles": {
+          "type": "array", "maxItems": 128,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "name": { "type": "string", "minLength": 1, "maxLength": 512 }
+            }
+          }
+        }
+      }
+    },
     "selection": {
-      "type": "object", "required": ["kind", "key", "label"],
-      "properties": { "kind": { "enum": ["preset", "formats"] }, "key": { "$ref": "#/$defs/safeString" }, "label": { "$ref": "#/$defs/safeString" }, "estimatedBytes": { "type": "integer", "minimum": 0 }, "expectedContainer": { "type": "string", "maxLength": 32 }, "videoFormatId": { "$ref": "#/$defs/safeString" }, "audioFormatId": { "$ref": "#/$defs/safeString" } }
+      "type": "object", "additionalProperties": false, "required": ["kind", "key", "label"],
+      "properties": {
+        "kind": { "enum": ["preset", "formats"] },
+        "key": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "estimatedBytes": { "type": "integer", "minimum": 0 },
+        "expectedContainer": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "videoFormatId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "audioFormatId": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "preset" } } },
+          "then": { "properties": { "key": { "enum": ["best", "best-mp4", "up-to-1080p", "up-to-720p", "audio-only"] } } }
+        }
+      ]
     },
     "summary": {
       "type": "object", "additionalProperties": false,
       "required": ["extractorKey", "mediaId", "webpageUrl", "title", "isLive", "selections", "probeToken", "probedAt"],
-      "properties": { "extractorKey": { "$ref": "#/$defs/safeString" }, "mediaId": { "$ref": "#/$defs/safeString" }, "webpageUrl": { "$ref": "#/$defs/httpUrl" }, "title": { "$ref": "#/$defs/safeString" }, "durationMs": { "type": "integer", "minimum": 0 }, "thumbnailUrl": { "$ref": "#/$defs/httpUrl" }, "uploader": { "$ref": "#/$defs/safeString" }, "isLive": { "type": "boolean" }, "isDrm": { "type": "boolean" }, "selections": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/selection" } }, "probeToken": { "$ref": "#/$defs/safeString" }, "probedAt": { "type": "integer", "minimum": 0 } }
+      "properties": {
+        "extractorKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "mediaId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "webpageUrl": { "$ref": "#/$defs/httpUrl" }, "title": { "$ref": "#/$defs/text" },
+        "durationMs": { "type": "integer", "minimum": 0 }, "thumbnailUrl": { "$ref": "#/$defs/httpUrl" },
+        "uploader": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "isLive": { "type": "boolean" }, "isDrm": { "type": "boolean" },
+        "selections": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/selection" } },
+        "probeToken": { "$ref": "#/$defs/token" }, "probedAt": { "type": "integer", "minimum": 0 }
+      }
     },
-    "progress": { "type": "object", "required": ["jobId", "stage"], "properties": { "jobId": { "$ref": "#/$defs/safeString" }, "stage": { "enum": ["planning", "downloading", "merging", "processing", "saving", "completed"] }, "downloadedBytes": { "type": "integer", "minimum": 0 }, "totalBytes": { "type": "integer", "minimum": 0 }, "percentage": { "type": "number", "minimum": 0, "maximum": 100 }, "speedBytesPerSecond": { "type": "number", "minimum": 0 }, "etaSeconds": { "type": "number", "minimum": 0 }, "detail": { "$ref": "#/$defs/safeString" } } },
-    "failure": { "type": "object", "required": ["code", "message", "recoverable"], "properties": { "jobId": { "$ref": "#/$defs/safeString" }, "code": { "type": "string", "maxLength": 64 }, "message": { "$ref": "#/$defs/safeString" }, "recoverable": { "type": "boolean" } } }
+    "queued": {
+      "type": "object", "additionalProperties": false, "required": ["jobId", "position"],
+      "properties": { "jobId": { "$ref": "#/$defs/id" }, "position": { "type": "integer", "minimum": 0 } }
+    },
+    "progress": {
+      "type": "object", "additionalProperties": false, "required": ["jobId", "stage"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/id" },
+        "stage": { "enum": ["planning", "downloading", "merging", "processing", "saving", "completed"] },
+        "downloadedBytes": { "type": "integer", "minimum": 0 }, "totalBytes": { "type": "integer", "minimum": 0 },
+        "percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+        "speedBytesPerSecond": { "type": "number", "minimum": 0 }, "etaSeconds": { "type": "number", "minimum": 0 },
+        "mediaRole": { "enum": ["audio", "video", "combined"] }, "detail": { "$ref": "#/$defs/text" }
+      }
+    },
+    "fallback": {
+      "type": "object", "additionalProperties": false, "required": ["jobId", "reason"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/id" },
+        "reason": { "enum": ["section-unsupported", "section-invalid", "exact-validation-failed"] },
+        "estimatedBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "completed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["jobId", "outputToken", "filename", "finalPath", "byteSize", "container", "extractorKey", "mediaId"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/id" }, "outputToken": { "$ref": "#/$defs/token" },
+        "filename": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "finalPath": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "container": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "extractorKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "mediaId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "accuracy": { "enum": ["keyframe-aligned", "exact"] },
+        "actualStartMs": { "type": "number", "minimum": 0 },
+        "actualDurationMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "toolProgress": {
+      "type": "object", "additionalProperties": false, "required": ["stage"],
+      "properties": {
+        "stage": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+        "detail": { "$ref": "#/$defs/text" }
+      }
+    }
   }
 }

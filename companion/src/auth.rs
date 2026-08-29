@@ -146,7 +146,7 @@ impl Drop for CookieJar {
 fn validate_cookie(cookie: &CookieRecord) -> Result<(), HostError> {
     let invalid = cookie.name.is_empty()
         || cookie.name.len() > 256
-        || cookie.value.len() > 16 * 1024
+        || cookie.value.len() > 8192
         || cookie.domain.is_empty()
         || cookie.domain.len() > 255
         || cookie.path.is_empty()
@@ -270,5 +270,25 @@ mod tests {
         assert!(!safe.contains("session"));
         assert!(!safe.contains("secret"));
         assert!(!safe.contains("Distinct Browser Agent"));
+    }
+
+    #[test]
+    fn auth_secrets_are_removed_before_diagnostic_truncation() {
+        let secret = "S".repeat(200);
+        let auth = AuthRequest::CurrentTab {
+            page_url: "https://example.com/watch".into(),
+            referer: "https://example.com/watch".into(),
+            user_agent: "Boundary Browser Agent".into(),
+            cookie_store_id: "0".into(),
+            incognito: false,
+            cookies: vec![CookieRecord {
+                value: secret.clone(),
+                ..cookie()
+            }],
+        };
+        let diagnostic = format!("{}{} tail", "x".repeat(950), secret);
+        let safe = redact_auth_diagnostic(&auth, &diagnostic);
+        assert!(!safe.contains("SSSS"));
+        assert!(safe.len() <= 1024);
     }
 }

@@ -4,8 +4,11 @@ use crate::protocol::{
     AuthRequest, ClipMode, ClipSpec, Envelope, ErrorCode, FallbackRequired, HostError,
     JobCompleted, JobProgress, StartClipRequest, StartDownloadRequest,
 };
-use crate::runner::{ManagedTool, ProcessOutput, ProcessRunner};
-use crate::security::{create_private_dir, opaque_token, safe_filename_component};
+use crate::runner::{ManagedTool, ProcessOutput, ProcessRunner, RunPolicy};
+use crate::security::{
+    create_private_dir, opaque_token, redact_diagnostic, safe_filename_component,
+    validate_public_page_url, validate_resolved_public_page_url,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -304,7 +307,11 @@ impl JobExecutor {
         cancelled: &Arc<AtomicBool>,
     ) -> Result<JobCompleted, HostError> {
         reject_unsupported_probe(probe)?;
-        validate_auth_page(&request.auth, &probe.page_url, self.developer_mode)?;
+        validate_auth_page(
+            &request.auth,
+            &probe.requested_page_url,
+            self.developer_mode,
+        )?;
         let selection = probe.selection(&request.selection_key)?;
         let temp = JobTemp::create(&self.temp_root)?;
         self.emit_progress(request_id, &request.job_id, "planning", None, None);
@@ -339,7 +346,11 @@ impl JobExecutor {
     ) -> Result<Option<JobCompleted>, HostError> {
         reject_unsupported_probe(probe)?;
         validate_clip(&request.clip, probe.duration_ms)?;
-        validate_auth_page(&request.auth, &probe.page_url, self.developer_mode)?;
+        validate_auth_page(
+            &request.auth,
+            &probe.requested_page_url,
+            self.developer_mode,
+        )?;
         let selection = probe.selection(&request.selection_key)?;
         let temp = JobTemp::create(&self.temp_root)?;
         self.emit_progress(request_id, &request.job_id, "planning", None, None);
@@ -454,21 +465,22 @@ impl JobExecutor {
             ManagedTool::Ffmpeg,
             &args,
             job_dir,
-            false,
+            RunPolicy::standard(false),
             cancelled,
             |_| {},
         )?;
         if !process.status.success() {
+            let diagnostic = if process.stderr.is_empty() {
+                "FFmpeg could not create the approved fallback clip".to_owned()
+            } else {
+                redact_diagnostic(&process.stderr)
+            };
             return Err(HostError::new(
                 match request.clip.mode {
                     ClipMode::Fast => ErrorCode::SectionUnsupported,
                     ClipMode::Exact => ErrorCode::ExactClipUnsupported,
                 },
-                if process.safe_stderr.is_empty() {
-                    "FFmpeg could not create the approved fallback clip"
-                } else {
-                    &process.safe_stderr
-                },
+                diagnostic,
             ));
         }
         let metrics = probe_media(&self.runner, &output, job_dir, cancelled)?;
@@ -535,12 +547,14 @@ impl JobExecutor {
             url_index - 1..url_index - 1,
             prepared_auth.args.iter().cloned(),
         );
+        let execution_url = validate_public_page_url(&probe.page_url, self.developer_mode)?;
+        validate_resolved_public_page_url(&execution_url, self.developer_mode)?;
         let mut file = None;
         let process = self.runner.run(
             ManagedTool::YtDlp,
             &args,
             job_dir,
-            matches!(auth, AuthRequest::BraveProfile { .. }),
+            RunPolicy::standard(matches!(auth, AuthRequest::BraveProfile { .. })),
             cancelled,
             |line| {
                 if let Some(path) = parse_file_marker(line) {
@@ -835,7 +849,7 @@ fn json_u64(value: &Value, key: &str) -> Option<u64> {
 }
 
 fn classify_download_failure(output: &ProcessOutput, auth: &AuthRequest) -> HostError {
-    let diagnostic = redact_auth_diagnostic(auth, &output.safe_stderr);
+    let diagnostic = redact_auth_diagnostic(auth, &output.stderr);
     let lower = diagnostic.to_ascii_lowercase();
     let auth_failure = ["sign in", "login", "authentication", "cookies"]
         .iter()
@@ -906,7 +920,7 @@ fn probe_media(
         ManagedTool::Ffprobe,
         &args,
         job_dir,
-        false,
+        RunPolicy::standard(false),
         cancelled,
         |_| {},
     )?;
@@ -1201,6 +1215,7 @@ mod tests {
         };
         ProbeRecord {
             token: "probe".into(),
+            requested_page_url: url.into(),
             page_url: url.into(),
             extractor_key: "Generic".into(),
             media_id: "id".into(),

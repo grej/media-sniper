@@ -1,6 +1,6 @@
 use crate::protocol::{ErrorCode, HostError};
 use std::fs;
-use std::net::IpAddr;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Component, Path};
 use url::{Host, Url};
 
@@ -101,6 +101,63 @@ fn ip_is_non_public(ip: IpAddr) -> bool {
     }
 }
 
+/// Resolve a production page host immediately before native execution and fail
+/// closed if DNS yields any address in a non-public range.
+pub fn validate_resolved_public_page_url(url: &Url, developer_mode: bool) -> Result<(), HostError> {
+    validate_resolved_public_page_url_with(url, developer_mode, |host, port| {
+        (host, port)
+            .to_socket_addrs()
+            .map(|addresses| addresses.map(|address| address.ip()).collect())
+    })
+}
+
+pub fn validate_resolved_public_page_url_with<F>(
+    url: &Url,
+    developer_mode: bool,
+    resolver: F,
+) -> Result<(), HostError>
+where
+    F: FnOnce(&str, u16) -> std::io::Result<Vec<IpAddr>>,
+{
+    if developer_mode {
+        return Ok(());
+    }
+    let Some(host) = url.host_str() else {
+        return Err(HostError::new(
+            ErrorCode::UrlUnsupported,
+            "The page URL has no host",
+        ));
+    };
+    if let Ok(address) = host.parse::<IpAddr>() {
+        if ip_is_non_public(address) {
+            return Err(HostError::new(
+                ErrorCode::UrlUnsupported,
+                "The page host resolved to a local or private network address",
+            ));
+        }
+        return Ok(());
+    }
+    let port = url.port_or_known_default().ok_or_else(|| {
+        HostError::new(
+            ErrorCode::UrlUnsupported,
+            "The page URL had no resolvable network port",
+        )
+    })?;
+    let addresses = resolver(host, port).map_err(|_| {
+        HostError::new(
+            ErrorCode::UrlUnsupported,
+            "The page host could not be resolved safely",
+        )
+    })?;
+    if addresses.is_empty() || addresses.into_iter().any(ip_is_non_public) {
+        return Err(HostError::new(
+            ErrorCode::UrlUnsupported,
+            "The page host resolved to a local or private network address",
+        ));
+    }
+    Ok(())
+}
+
 pub fn bounded_text(value: Option<&str>, fallback: &str, max: usize) -> String {
     let value = value.unwrap_or(fallback);
     let cleaned: String = value
@@ -176,7 +233,7 @@ pub fn redact_diagnostic(input: &str) -> String {
     };
 
     for prefix in ["Cookie:", "Authorization:", "Set-Cookie:"] {
-        redacted = redact_after_prefix(&redacted, prefix);
+        redacted = redact_all_after_prefix(redacted, prefix);
     }
 
     let mut result = String::with_capacity(redacted.len());
@@ -200,18 +257,22 @@ pub fn redact_diagnostic(input: &str) -> String {
     bounded_text(Some(&result), "Operation failed", 1024)
 }
 
-fn redact_after_prefix(input: &str, prefix: &str) -> String {
-    let lower = input.to_ascii_lowercase();
+fn redact_all_after_prefix(mut input: String, prefix: &str) -> String {
     let prefix_lower = prefix.to_ascii_lowercase();
-    let Some(position) = lower.find(&prefix_lower) else {
-        return input.to_owned();
-    };
-    let value_start = position + prefix.len();
-    let value_end = input[value_start..]
-        .find(['\n', '\r'])
-        .map(|offset| value_start + offset)
-        .unwrap_or(input.len());
-    format!("{}<redacted>{}", &input[..value_start], &input[value_end..])
+    let mut search_start = 0;
+    loop {
+        let lower = input.to_ascii_lowercase();
+        let Some(offset) = lower[search_start..].find(&prefix_lower) else {
+            return input;
+        };
+        let value_start = search_start + offset + prefix.len();
+        let value_end = input[value_start..]
+            .find(['\n', '\r'])
+            .map(|offset| value_start + offset)
+            .unwrap_or(input.len());
+        input.replace_range(value_start..value_end, "<redacted>");
+        search_start = value_start + "<redacted>".len();
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +296,25 @@ mod tests {
     }
 
     #[test]
+    fn resolved_page_hosts_fail_closed_on_private_or_mixed_dns_answers() {
+        let url = Url::parse("https://public-looking.example/watch").unwrap();
+        let private = |_host: &str, _port: u16| Ok(vec!["127.0.0.1".parse().unwrap()]);
+        assert!(validate_resolved_public_page_url_with(&url, false, private).is_err());
+
+        let mixed = |_host: &str, _port: u16| {
+            Ok(vec![
+                "93.184.216.34".parse().unwrap(),
+                "192.168.1.10".parse().unwrap(),
+            ])
+        };
+        assert!(validate_resolved_public_page_url_with(&url, false, mixed).is_err());
+
+        let public = |_host: &str, _port: u16| Ok(vec!["93.184.216.34".parse().unwrap()]);
+        assert!(validate_resolved_public_page_url_with(&url, false, public).is_ok());
+        assert!(validate_resolved_public_page_url_with(&url, true, private).is_ok());
+    }
+
+    #[test]
     fn option_looking_urls_still_validate_as_urls() {
         assert!(validate_public_page_url("--exec=bad", false).is_err());
         assert!(validate_public_page_url("https://example.com/--exec=bad", false).is_ok());
@@ -255,5 +335,16 @@ mod tests {
         );
         assert!(!diagnostic.contains("Bearer secret"));
         assert!(!diagnostic.contains("token=secret"));
+    }
+
+    #[test]
+    fn diagnostics_redact_every_repeated_sensitive_header() {
+        let diagnostic = redact_diagnostic(
+            "Cookie: first\nAuthorization: bearer one\nCookie: second\nSet-Cookie: third",
+        );
+        for secret in ["first", "bearer one", "second", "third"] {
+            assert!(!diagnostic.contains(secret));
+        }
+        assert_eq!(diagnostic.matches("<redacted>").count(), 4);
     }
 }
