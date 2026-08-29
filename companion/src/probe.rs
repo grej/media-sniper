@@ -79,7 +79,7 @@ impl ProbeCache {
 
     pub fn invalidate_page(&mut self, page_url: &str) {
         self.records
-            .retain(|_, record| record.requested_page_url == page_url);
+            .retain(|_, record| record.requested_page_url != page_url);
     }
 
     fn purge_expired(&mut self) {
@@ -295,15 +295,22 @@ fn normalize_probe(
         .and_then(Value::as_str)
         .map(|value| bounded_text(Some(value), "", 256))
         .filter(|value| !value.is_empty());
-    let options = selections
-        .values()
-        .map(|selection| SelectionOption::Preset {
-            key: selection.key.clone(),
-            label: selection.label.clone(),
-            estimated_bytes: selection.estimated_bytes,
-            expected_container: selection.expected_container.clone(),
-        })
-        .collect();
+    let options = [
+        "best-mp4",
+        "best",
+        "up-to-1080p",
+        "up-to-720p",
+        "audio-only",
+    ]
+    .into_iter()
+    .filter_map(|key| selections.get(key))
+    .map(|selection| SelectionOption::Preset {
+        key: selection.key.clone(),
+        label: selection.label.clone(),
+        estimated_bytes: selection.estimated_bytes,
+        expected_container: selection.expected_container.clone(),
+    })
+    .collect();
     let summary = MediaSummary {
         extractor_key: extractor_key.clone(),
         media_id: media_id.clone(),
@@ -515,6 +522,23 @@ mod tests {
             .selections
             .values()
             .any(|selection| selection.selector.contains("exec")));
+        let quality_keys = summary
+            .selections
+            .iter()
+            .map(|selection| match selection {
+                SelectionOption::Preset { key, .. } => key.as_str(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            quality_keys,
+            [
+                "best-mp4",
+                "best",
+                "up-to-1080p",
+                "up-to-720p",
+                "audio-only"
+            ],
+        );
     }
 
     #[test]
@@ -527,6 +551,32 @@ mod tests {
         .unwrap();
         assert!(record.selection("best").is_ok());
         assert!(record.selection("best --exec touch /tmp/bad").is_err());
+    }
+
+    #[test]
+    fn replacing_one_page_probe_preserves_other_tab_probes() {
+        let (_, first) = normalize_probe(
+            json!({"id":"first","title":"First"}),
+            "https://example.com/first".into(),
+            false,
+        )
+        .unwrap();
+        let (_, second) = normalize_probe(
+            json!({"id":"second","title":"Second"}),
+            "https://example.com/second".into(),
+            false,
+        )
+        .unwrap();
+        let first_token = first.token.clone();
+        let second_token = second.token.clone();
+        let mut cache = ProbeCache::default();
+        cache.insert(first);
+        cache.insert(second);
+
+        cache.invalidate_page("https://example.com/first");
+
+        assert!(cache.get(&first_token).is_err());
+        assert!(cache.get(&second_token).is_ok());
     }
 
     #[test]

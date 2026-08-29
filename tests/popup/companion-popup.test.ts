@@ -77,6 +77,17 @@ describe("companion popup", () => {
     fallback?.click();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fallback result"));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "COMPANION_HEALTH" }));
+    expect(document.getElementById("detectedVideosList")?.hidden).toBe(true);
+    expect(document.body.textContent).toContain("Back to detected media");
+    expect([...document.querySelectorAll("button")].filter((item) => item.textContent === "Clip"))
+      .toHaveLength(1);
+
+    const back = [...document.querySelectorAll("button")]
+      .find((item) => item.textContent === "Back to detected media");
+    back?.click();
+    await vi.waitFor(() => expect(document.getElementById("detectedVideosList")?.hidden).toBe(false));
+    expect(document.body.textContent).not.toContain("Fallback result");
+    expect(document.body.textContent).toContain("Try yt-dlp for this page");
   });
 
   it("renders only allowlisted selections returned by a sanitized probe", async () => {
@@ -107,7 +118,10 @@ describe("companion popup", () => {
     expect(document.getElementById("detectedVideosList")?.hidden).toBe(true);
     const options = [...document.querySelectorAll<HTMLOptionElement>("#companion-quality option")];
     expect(options.map((item) => item.value)).toEqual(["best", "audio-only"]);
-    expect(document.body.textContent).toContain("Current page via companion");
+    expect(document.body.textContent).toContain("Fixture media");
+    expect(document.querySelector(".clip-editor-slot")).not.toBeNull();
+    expect([...document.querySelectorAll("button")].filter((item) => item.textContent === "Clip"))
+      .toHaveLength(1);
     expect(document.querySelector("input[placeholder*='argument']")).toBeNull();
   });
 

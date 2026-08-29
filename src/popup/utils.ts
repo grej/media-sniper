@@ -197,8 +197,12 @@ export function browserDownloadMatchesUrl(
   normalizedMediaUrl: string,
 ): boolean {
   if (
-    download.operation?.backend === "yt-dlp" ||
-    download.metadata?.source?.kind === "yt-dlp"
+    typeof __COMPANION_BUILD__ !== "undefined" &&
+    __COMPANION_BUILD__ &&
+    (
+      download.operation?.backend === "yt-dlp" ||
+      download.metadata?.source?.kind === "yt-dlp"
+    )
   ) return false;
 
   const mediaUrl = download.metadata?.source?.kind === "browser"

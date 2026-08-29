@@ -14,6 +14,7 @@ import type {
   YtDlpMediaSummary,
 } from "./types";
 import { companionFailureMessage } from "./failure-messages";
+import { SerialEventQueue } from "./event-queue";
 
 export const CompanionUiMessage = {
   HEALTH: "COMPANION_HEALTH",
@@ -324,6 +325,11 @@ async function onCompanionEvent(event: CompanionEvent): Promise<void> {
   }
 }
 
+const companionEventQueue = new SerialEventQueue<CompanionEvent>(
+  onCompanionEvent,
+  (error) => console.error("Could not persist companion event:", error),
+);
+
 async function checkHealth(): Promise<CompanionHealth> {
   // A host launched before a graphical tool install has no worker queue, and a
   // host launched before an update intentionally keeps its verified tool paths.
@@ -474,7 +480,7 @@ async function dispatch(message: { type?: string; payload?: Record<string, unkno
 export function registerCompanionService(): void {
   if (registered) return;
   registered = true;
-  client.subscribe((event) => void onCompanionEvent(event));
+  client.subscribe((event) => companionEventQueue.push(event));
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // This notification is consumed by extension views; it is not an action
     // request for the background service itself.

@@ -7,6 +7,8 @@ import type {
   YtDlpMediaSummary,
 } from "../core/companion/types";
 import { companionFailureMessage } from "../core/companion/failure-messages";
+import type { ClipEditorController, ClipEditorSubmit } from "./clip-editor";
+import { createPageClipEditor } from "./clip-actions";
 import { formatFileSize } from "./utils";
 
 const MSG = {
@@ -46,6 +48,8 @@ let manualFallbackRequested = false;
 let authChoice: AuthChoice = { authMode: "anonymous" };
 let fallback: CompanionFallback | null = null;
 let lastClip: { probeToken: string; selectionKey: string; startMs: number; endMs: number; mode: "fast" | "exact" } | null = null;
+let companionClipEditor: ClipEditorController | null = null;
+let renderGeneration = 0;
 
 async function send<T>(type: string, payload: Record<string, unknown> = {}): Promise<T> {
   const response = await chrome.runtime.sendMessage({ type, payload });
@@ -112,6 +116,13 @@ async function activateManualFallback(): Promise<void> {
   await checkHealth();
 }
 
+async function useBrowserDetection(): Promise<void> {
+  manualFallbackRequested = false;
+  error = null;
+  fallback = null;
+  await render();
+}
+
 async function analyze(choice: AuthChoice = authChoice): Promise<void> {
   if (choice.authMode === "current-tab") {
     try {
@@ -140,22 +151,20 @@ async function startDownload(): Promise<void> {
   });
 }
 
-function parseSeconds(id: string): number | null {
-  const value = Number(root.querySelector<HTMLInputElement>(id)?.value);
-  return Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) : null;
-}
-
-async function startClip(allowFullDownloadFallback = false): Promise<void> {
+async function startClipFromEditor(
+  value: ClipEditorSubmit,
+  allowFullDownloadFallback = false,
+): Promise<void> {
   if (!summary) return;
-  const selectionKey = selectedKey();
-  const startMs = parseSeconds("#companion-clip-start");
-  const endMs = parseSeconds("#companion-clip-end");
-  const mode = root.querySelector<HTMLSelectElement>("#companion-clip-mode")?.value as "fast" | "exact";
-  if (!selectionKey || startMs === null || endMs === null || endMs <= startMs) {
-    setError({ code: "INVALID_REQUEST", message: "Enter a clip end time after its start time.", recoverable: true });
-    await render(); return;
-  }
-  lastClip = { probeToken: summary.probeToken, selectionKey, startMs, endMs, mode };
+  const selectionKey = value.qualityKey ?? selectedKey();
+  if (!selectionKey) return;
+  lastClip = {
+    probeToken: summary.probeToken,
+    selectionKey,
+    startMs: value.clip.startMs,
+    endMs: value.clip.endMs,
+    mode: value.clip.mode,
+  };
   await perform(async () => {
     await send(MSG.clip, { ...lastClip!, allowFullDownloadFallback, ...authChoice });
     if (allowFullDownloadFallback) fallback = null;
@@ -342,10 +351,49 @@ function renderProfileChoice(container: HTMLElement): void {
   container.append(disclosure, select, consent, retry);
 }
 
+function destroyCompanionClipEditor(): void {
+  companionClipEditor?.destroy();
+  companionClipEditor = null;
+}
+
+async function toggleCompanionClipEditor(trigger: HTMLElement): Promise<void> {
+  if (!summary) return;
+  const card = trigger.closest<HTMLElement>(".companion-card");
+  const slot = card?.querySelector<HTMLElement>(".clip-editor-slot");
+  if (!slot) return;
+  if (slot.childElementCount > 0) {
+    destroyCompanionClipEditor();
+    slot.replaceChildren();
+    return;
+  }
+
+  const preferredQuality = selectedKey();
+  const selections = [...summary.selections].sort((left, right) =>
+    Number(right.key === preferredQuality) - Number(left.key === preferredQuality));
+  try {
+    companionClipEditor = await createPageClipEditor({
+      sourceKey: `yt-dlp:${summary.extractorKey}:${summary.mediaId}`,
+      pageUrl: summary.webpageUrl,
+      durationMs: summary.durationMs,
+      initialQualityKey: preferredQuality ?? undefined,
+      qualities: selections.map((selection) => ({
+        key: selection.key,
+        label: `${selection.label}${selection.estimatedBytes ? ` · about ${formatFileSize(selection.estimatedBytes)}` : ""}`,
+        selection: { qualityKey: selection.key, label: selection.label },
+      })),
+      onSubmit: (value) => startClipFromEditor(value, false),
+      onClose: () => { companionClipEditor = null; },
+    });
+    slot.append(companionClipEditor.element);
+  } catch (caught) {
+    setError(caught);
+    await render();
+  }
+}
+
 function summaryView(container: HTMLElement): void {
   if (!summary) return;
   const card = document.createElement("section"); card.className = "companion-card";
-  card.append(text("companion-kicker", "Current page via companion"));
   card.append(text("companion-title", summary.title));
   const details = [summary.uploader, summary.durationMs ? `${Math.round(summary.durationMs / 1000)} sec` : undefined, summary.extractorKey].filter(Boolean).join(" · ");
   card.append(text("companion-copy", details));
@@ -364,21 +412,14 @@ function summaryView(container: HTMLElement): void {
     quality.disabled = true;
     card.append(text("companion-warning", "No supported single-video quality was found for this page."));
   }
-  if (!summary.isDrm && !summary.isLive) card.append(button("Download", startDownload));
-
   if (!summary.isLive && !summary.isDrm) {
-    const clip = document.createElement("details"); clip.className = "companion-clip";
-    const heading = document.createElement("summary"); heading.textContent = "Create clip"; clip.append(heading);
-    const fields = document.createElement("div"); fields.className = "companion-fields";
-    const start = document.createElement("input"); start.id = "companion-clip-start"; start.type = "number"; start.min = "0"; start.step = "0.001"; start.value = "0"; start.placeholder = "Start seconds";
-    const end = document.createElement("input"); end.id = "companion-clip-end"; end.type = "number"; end.min = "0.001"; end.step = "0.001"; end.value = summary.durationMs ? String(Math.min(10, summary.durationMs / 1000)) : "10"; end.placeholder = "End seconds";
-    const mode = document.createElement("select"); mode.id = "companion-clip-mode";
-    for (const [value, label] of [["fast", "Fast · keyframe-aligned"], ["exact", "Exact · validated"]]) {
-      const option = document.createElement("option"); option.value = value; option.textContent = label; mode.append(option);
-    }
-    fields.append(start, end, mode); clip.append(fields, button("Create clip", () => startClip(false)));
-    clip.append(text("companion-privacy", "If section downloading is unavailable, Media Sniper will ask before downloading the full source."));
-    card.append(clip);
+    const actions = document.createElement("div"); actions.className = "card-actions";
+    actions.append(button("Download", startDownload));
+    const clipButton = button("Clip", () => toggleCompanionClipEditor(clipButton), true);
+    clipButton.title = "Choose timestamps using the current video position";
+    actions.append(clipButton);
+    const slot = document.createElement("div"); slot.className = "clip-editor-slot";
+    card.append(actions, slot);
   }
   container.append(card);
 }
@@ -397,11 +438,12 @@ function fallbackView(container: HTMLElement): void {
   container.append(card);
 }
 
-async function jobsView(container: HTMLElement): Promise<void> {
+async function jobsView(container: HTMLElement, generation: number): Promise<void> {
   const jobs = (await getAllDownloads())
     .filter((item) => item.operation?.backend === "yt-dlp")
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, 10);
+  if (generation !== renderGeneration) return;
   if (!jobs.length) return;
   const terminal = new Set([DownloadStage.COMPLETED, DownloadStage.FAILED, DownloadStage.CANCELLED]);
   const active = jobs.filter((job) => !terminal.has(job.progress.stage) || Boolean(job.operation?.companion?.fallbackReason));
@@ -483,20 +525,29 @@ function jobView(job: DownloadState, currentPage = false): HTMLElement {
 
 async function render(): Promise<void> {
   if (!root) return;
+  const generation = ++renderGeneration;
+  destroyCompanionClipEditor();
   root.replaceChildren();
-  browserList.hidden = !browserMediaDetected;
+  browserList.hidden = fallbackActive();
   if (!fallbackActive()) {
     manualFallbackView(root);
     return;
   }
 
+  if (browserMediaDetected && manualFallbackRequested) {
+    const switcher = document.createElement("section"); switcher.className = "companion-switcher";
+    switcher.append(button("Back to detected media", useBrowserDetection, true));
+    root.append(switcher);
+  }
+
   const heading = text(
     "companion-section-heading",
-    browserMediaDetected ? "yt-dlp fallback" : "Looking beyond browser detection",
+    browserMediaDetected ? "Alternate download options" : "Looking beyond browser detection",
   );
   root.append(heading);
   if (busy) root.append(text("companion-loading", "Working with the companion…"));
-  healthView(root); errorView(root); summaryView(root); fallbackView(root); await jobsView(root);
+  healthView(root); errorView(root); summaryView(root); fallbackView(root);
+  await jobsView(root, generation);
 }
 
 function installStyles(): void {
@@ -505,6 +556,7 @@ function installStyles(): void {
     #companionPanel{padding:0 var(--space-3) var(--space-2)}
     .companion-manual{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);margin-top:var(--space-2);padding-top:var(--space-2)}
     .companion-manual .companion-privacy{margin:5px 0;flex:1}
+    .companion-switcher{display:flex;justify-content:flex-end;margin:4px 0}
     .companion-section-heading,.companion-kicker{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-tertiary);margin:8px 0}
     .companion-card{display:block;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-2)}
     .companion-title{font-weight:600;color:var(--text-primary);margin-bottom:4px;overflow-wrap:anywhere}

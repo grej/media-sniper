@@ -122,10 +122,12 @@ export function setupDetectedVideosEventDelegation(): void {
   detectedVideosList.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
 
-    const ytDlpFallbackBtn = target.closest<HTMLElement>(".video-btn-ytdlp-fallback");
-    if (ytDlpFallbackBtn) {
-      window.dispatchEvent(new CustomEvent("media-sniper:yt-dlp-fallback"));
-      return;
+    if (typeof __COMPANION_BUILD__ !== "undefined" && __COMPANION_BUILD__) {
+      const ytDlpFallbackBtn = target.closest<HTMLElement>(".video-btn-ytdlp-fallback");
+      if (ytDlpFallbackBtn) {
+        window.dispatchEvent(new CustomEvent("media-sniper:yt-dlp-fallback"));
+        return;
+      }
     }
 
     const clipBtn = target.closest<HTMLElement>(".video-btn-clip");
