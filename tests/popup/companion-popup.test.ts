@@ -35,10 +35,48 @@ describe("companion popup", () => {
       return { success: true, data: {} };
     });
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
-    await initializeCompanionPopup();
+    await initializeCompanionPopup({ browserMediaDetected: false });
     expect(document.body.textContent).toContain("Install companion");
     expect(document.body.textContent).toContain("Check again");
     expect(document.body.textContent).not.toMatch(/terminal command|run yt-dlp|brew install/i);
+  });
+
+  it("keeps browser detection primary and opens yt-dlp only when requested", async () => {
+    const health = {
+      protocolVersion: 1, companionVersion: "1.0.0", browserTarget: "brave", platform: "macos",
+      healthy: true, issues: [], ytDlpVersion: "2026.08.19", ffmpegVersion: "8.0",
+      capabilities: {
+        probe: true, download: true, sectionDownload: true, exactClip: true,
+        currentTabCookies: true, braveProfileCookies: true, revealOutput: true,
+      },
+    };
+    const send = vi.fn(async ({ type }: { type: string }) => {
+      if (type === "COMPANION_HEALTH") return { success: true, data: health };
+      if (type === "COMPANION_GET_STATE") return { success: true, data: { summaries: [] } };
+      if (type === "COMPANION_PROBE") return {
+        success: true,
+        data: {
+          extractorKey: "Twitter", mediaId: "post", webpageUrl: "https://x.com/example/status/1",
+          title: "Fallback result", durationMs: 10_000, isLive: false, probeToken: "opaque",
+          probedAt: Date.now(), selections: [{ kind: "preset", key: "best", label: "Best" }],
+        },
+      };
+      return { success: true, data: {} };
+    });
+    installChrome(send);
+    const { initializeCompanionPopup } = await import("@/popup/companion-popup");
+    await initializeCompanionPopup({ browserMediaDetected: true });
+
+    expect(document.body.textContent).toContain("Try yt-dlp for this page");
+    expect(document.getElementById("detectedVideosList")?.hidden).toBe(false);
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "COMPANION_HEALTH" }));
+    expect(document.body.textContent).not.toContain("Media Sniper Companion");
+
+    const fallback = [...document.querySelectorAll("button")]
+      .find((item) => item.textContent === "Try yt-dlp for this page");
+    fallback?.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Fallback result"));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "COMPANION_HEALTH" }));
   });
 
   it("renders only allowlisted selections returned by a sanitized probe", async () => {
@@ -64,10 +102,9 @@ describe("companion popup", () => {
     });
     installChrome(send);
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
-    await initializeCompanionPopup();
-    const analyze = [...document.querySelectorAll("button")].find((item) => item.textContent?.includes("Analyze"));
-    analyze?.click();
+    await initializeCompanionPopup({ browserMediaDetected: false });
     await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>("#companion-quality")?.options.length).toBe(2));
+    expect(document.getElementById("detectedVideosList")?.hidden).toBe(true);
     const options = [...document.querySelectorAll<HTMLOptionElement>("#companion-quality option")];
     expect(options.map((item) => item.value)).toEqual(["best", "audio-only"]);
     expect(document.body.textContent).toContain("Current page via companion");
@@ -100,7 +137,7 @@ describe("companion popup", () => {
       return { success: true, data: {} };
     });
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
-    await initializeCompanionPopup();
+    await initializeCompanionPopup({ browserMediaDetected: false });
     expect(document.body.textContent).toContain("Update needed");
     expect(document.body.textContent).toContain("Get update");
     expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
@@ -127,9 +164,7 @@ describe("companion popup", () => {
       return { success: true, data: { summaries: [] } };
     });
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
-    await initializeCompanionPopup();
-    const analyze = [...document.querySelectorAll("button")].find((item) => item.textContent?.includes("Analyze"));
-    analyze?.click();
+    await initializeCompanionPopup({ browserMediaDetected: false });
     await vi.waitFor(() => expect(document.body.textContent).toContain("This video needs your YouTube session."));
     expect(document.body.textContent).toContain("Retry using this Brave session");
     expect(document.body.textContent).toContain("discarded afterward and never saved in history");
@@ -169,10 +204,16 @@ describe("companion popup", () => {
           },
         };
       }
+      if (type === "COMPANION_PROBE") {
+        return {
+          success: false,
+          error: { code: "FORMAT_UNAVAILABLE", message: "No supported format", recoverable: true },
+        };
+      }
       return { success: true, data: { summaries: [] } };
     });
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
-    await initializeCompanionPopup();
+    await initializeCompanionPopup({ browserMediaDetected: false });
     expect(document.body.textContent).toContain("Media Sniper's media tools need an update");
     expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
   });
@@ -217,7 +258,7 @@ describe("companion popup", () => {
     });
 
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
-    await initializeCompanionPopup();
+    await initializeCompanionPopup({ browserMediaDetected: false });
 
     expect(document.body.textContent).toContain("Clip saved");
     expect(document.body.textContent).toContain("Saved to Downloads/Media Sniper");

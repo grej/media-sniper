@@ -188,10 +188,24 @@ export function getDownloadStateForVideo(
   video: VideoMetadata,
 ): DownloadState | undefined {
   const normalizedUrl = normalizeUrl(video.url);
-  return downloadStates.find((d) => {
-    if (!d.metadata) return false;
-    return normalizeUrl(d.metadata.url) === normalizedUrl;
-  });
+  return downloadStates.find((download) => browserDownloadMatchesUrl(download, normalizedUrl));
+}
+
+/** Companion history has a page identity, not a browser-fetchable media URL. */
+export function browserDownloadMatchesUrl(
+  download: DownloadState,
+  normalizedMediaUrl: string,
+): boolean {
+  if (
+    download.operation?.backend === "yt-dlp" ||
+    download.metadata?.source?.kind === "yt-dlp"
+  ) return false;
+
+  const mediaUrl = download.metadata?.source?.kind === "browser"
+    ? download.metadata.source.mediaUrl
+    : download.metadata?.url;
+  return typeof mediaUrl === "string" && mediaUrl.length > 0 &&
+    normalizeUrl(mediaUrl) === normalizedMediaUrl;
 }
 
 export { formatFileSize };

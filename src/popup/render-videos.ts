@@ -122,6 +122,12 @@ export function setupDetectedVideosEventDelegation(): void {
   detectedVideosList.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
 
+    const ytDlpFallbackBtn = target.closest<HTMLElement>(".video-btn-ytdlp-fallback");
+    if (ytDlpFallbackBtn) {
+      window.dispatchEvent(new CustomEvent("media-sniper:yt-dlp-fallback"));
+      return;
+    }
+
     const clipBtn = target.closest<HTMLElement>(".video-btn-clip");
     if (clipBtn) {
       const url = clipBtn.dataset.url;
@@ -497,6 +503,12 @@ function renderVideoItem(video: VideoMetadata): string {
                       title="Choose timestamps and create an MP4 clip">
                 Clip
               </button>
+              ${isFailed && __COMPANION_BUILD__ ? `
+                <button class="video-btn-ytdlp-fallback"
+                        title="Retry this page using the local companion">
+                  Retry with yt-dlp
+                </button>
+              ` : ""}
             ` : ""}
             ${(video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) && !hasDrm && !unsupported ? `
               <button class="video-btn-manifest"

@@ -26,11 +26,23 @@ const MSG = {
 type AuthChoice = { authMode: "anonymous" | "current-tab" | "brave-profile"; profileId?: string };
 type ErrorView = { code: CompanionErrorCode; message: string; recoverable: boolean };
 
+export interface CompanionPopupOptions {
+  browserMediaDetected: boolean;
+}
+
+export interface CompanionPopupController {
+  setBrowserMediaDetected(value: boolean): Promise<void>;
+  activateManualFallback(): Promise<void>;
+}
+
 let root: HTMLElement;
+let browserList: HTMLElement;
 let health: CompanionHealth | null = null;
 let summary: YtDlpMediaSummary | null = null;
 let error: ErrorView | null = null;
 let busy = false;
+let browserMediaDetected = false;
+let manualFallbackRequested = false;
 let authChoice: AuthChoice = { authMode: "anonymous" };
 let fallback: CompanionFallback | null = null;
 let lastClip: { probeToken: string; selectionKey: string; startMs: number; endMs: number; mode: "fast" | "exact" } | null = null;
@@ -78,7 +90,26 @@ async function perform(action: () => Promise<void>): Promise<void> {
 }
 
 async function checkHealth(): Promise<void> {
-  await perform(async () => { health = await send<CompanionHealth>(MSG.health); });
+  await perform(async () => {
+    health = await send<CompanionHealth>(MSG.health);
+    if (!health.healthy) return;
+    const state = await send<{ summaries?: YtDlpMediaSummary[] }>(MSG.state);
+    summary = state.summaries?.[0] ?? null;
+    if (!summary) {
+      summary = await send<YtDlpMediaSummary>(MSG.probe, { authMode: "anonymous" });
+      authChoice = { authMode: "anonymous" };
+    }
+  });
+}
+
+function fallbackActive(): boolean {
+  return !browserMediaDetected || manualFallbackRequested;
+}
+
+async function activateManualFallback(): Promise<void> {
+  manualFallbackRequested = true;
+  await render();
+  await checkHealth();
 }
 
 async function analyze(choice: AuthChoice = authChoice): Promise<void> {
@@ -192,7 +223,21 @@ async function retryPersistedFast(job: DownloadState): Promise<void> {
   });
 }
 
+function manualFallbackView(container: HTMLElement): void {
+  const card = document.createElement("section");
+  card.className = "companion-manual";
+  card.append(button("Try yt-dlp for this page", activateManualFallback, true));
+  card.append(text(
+    "companion-privacy",
+    "Use the local companion for alternate formats or if the browser download does not work.",
+  ));
+  container.append(card);
+}
+
 function healthView(container: HTMLElement): void {
+  if (health?.healthy && (busy || summary || error)) return;
+  if (!health && (busy || error)) return;
+
   const card = document.createElement("section");
   card.className = "companion-card";
   const missingTools = health?.issues.some((issue) => issue.code === "TOOLS_MISSING") ?? false;
@@ -226,9 +271,8 @@ function healthView(container: HTMLElement): void {
     ));
     card.append(button("Check again", checkHealth, true));
   } else {
-    const versions = [health.ytDlpVersion && `yt-dlp ${health.ytDlpVersion}`, health.ffmpegVersion && `FFmpeg ${health.ffmpegVersion}`].filter(Boolean).join(" · ");
-    card.append(text("companion-copy", versions || "Companion ready"));
-    card.append(button("Analyze this page with yt-dlp", () => analyze({ authMode: "anonymous" })));
+    card.append(text("companion-copy", "The local companion is ready to inspect this page."));
+    card.append(button("Analyze with yt-dlp", () => analyze({ authMode: "anonymous" })));
   }
   container.append(card);
 }
@@ -440,7 +484,17 @@ function jobView(job: DownloadState, currentPage = false): HTMLElement {
 async function render(): Promise<void> {
   if (!root) return;
   root.replaceChildren();
-  const heading = text("companion-section-heading", "Page analysis"); root.append(heading);
+  browserList.hidden = !browserMediaDetected;
+  if (!fallbackActive()) {
+    manualFallbackView(root);
+    return;
+  }
+
+  const heading = text(
+    "companion-section-heading",
+    browserMediaDetected ? "yt-dlp fallback" : "Looking beyond browser detection",
+  );
+  root.append(heading);
   if (busy) root.append(text("companion-loading", "Working with the companion…"));
   healthView(root); errorView(root); summaryView(root); fallbackView(root); await jobsView(root);
 }
@@ -449,6 +503,8 @@ function installStyles(): void {
   const style = document.createElement("style");
   style.textContent = `
     #companionPanel{padding:0 var(--space-3) var(--space-2)}
+    .companion-manual{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);margin-top:var(--space-2);padding-top:var(--space-2)}
+    .companion-manual .companion-privacy{margin:5px 0;flex:1}
     .companion-section-heading,.companion-kicker{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-tertiary);margin:8px 0}
     .companion-card{display:block;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-2)}
     .companion-title{font-weight:600;color:var(--text-primary);margin-bottom:4px;overflow-wrap:anywhere}
@@ -463,16 +519,39 @@ function installStyles(): void {
   document.head.append(style);
 }
 
-export async function initializeCompanionPopup(): Promise<void> {
+const controller: CompanionPopupController = {
+  activateManualFallback,
+  async setBrowserMediaDetected(value: boolean): Promise<void> {
+    const changed = browserMediaDetected !== value;
+    browserMediaDetected = value;
+    if (value && !manualFallbackRequested) {
+      error = null;
+      fallback = null;
+      summary = null;
+    }
+    if (!value) manualFallbackRequested = false;
+    await render();
+    if (changed && !value) await checkHealth();
+  },
+};
+
+export async function initializeCompanionPopup(
+  options: CompanionPopupOptions,
+): Promise<CompanionPopupController | null> {
   const list = document.getElementById("detectedVideosList");
-  if (!list || document.getElementById("companionPanel")) return;
+  if (!list) return null;
+  if (document.getElementById("companionPanel")) return controller;
   installStyles();
+  browserList = list;
+  browserMediaDetected = options.browserMediaDetected;
+  manualFallbackRequested = false;
   root = document.createElement("div"); root.id = "companionPanel";
-  list.parentElement?.insertBefore(root, list);
+  list.insertAdjacentElement("afterend", root);
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type !== MSG.changed) return;
     if (message.payload?.activeTabChanged === true) {
-      error = null; fallback = null; lastClip = null; authChoice = { authMode: "anonymous" };
+      error = null; fallback = null; lastClip = null; manualFallbackRequested = false;
+      authChoice = { authMode: "anonymous" };
       void send<{ summaries: YtDlpMediaSummary[] }>(MSG.state)
         .then((state) => { summary = state.summaries[0] ?? null; })
         .catch(() => { summary = null; })
@@ -484,11 +563,6 @@ export async function initializeCompanionPopup(): Promise<void> {
     void render();
   });
   await render();
-  try {
-    const state = await send<{ summaries: YtDlpMediaSummary[] }>(MSG.state);
-    summary = state.summaries[0] ?? null;
-  } catch {
-    // Health below provides the actionable recovery state.
-  }
-  await checkHealth();
+  if (!browserMediaDetected) await checkHealth();
+  return controller;
 }

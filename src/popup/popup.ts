@@ -29,6 +29,19 @@ import { destroyClipEditors } from "./clip-actions";
 import { detectedVideoKeyForRemoval, upsertDetectedVideo } from "./detected-videos";
 
 const RENDER_DEBOUNCE_MS = 200;
+type CompanionPopupController = import("./companion-popup").CompanionPopupController;
+
+let companionPopupController: CompanionPopupController | null = null;
+
+function hasDetectedBrowserMedia(): boolean {
+  return Object.keys(detectedVideos).length > 0;
+}
+
+function syncCompanionDetection(): void {
+  void companionPopupController
+    ?.setBrowserMediaDetected(hasDetectedBrowserMedia())
+    .catch((error) => console.debug("Could not update companion routing:", error));
+}
 
 // ---- Debounce state ----
 let renderDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -189,7 +202,8 @@ async function requestDetectedVideos(): Promise<void> {
     const currentUrl = tab.url || "";
     const filteredVideos: Record<string, VideoMetadata> = {};
     for (const [url, video] of Object.entries(detectedVideos)) {
-      if (!(video as VideoMetadata).pageUrl.includes(currentUrl)) {
+      const pageUrl = (video as VideoMetadata).pageUrl;
+      if (pageUrl && (pageUrl === currentUrl || pageUrl.includes(currentUrl) || currentUrl.includes(pageUrl))) {
         filteredVideos[url] = video as VideoMetadata;
       }
     }
@@ -208,6 +222,7 @@ async function requestDetectedVideos(): Promise<void> {
     }
 
     renderDetectedVideos();
+    syncCompanionDetection();
   } catch (error) {
     console.debug("Could not get detected videos:", error);
   }
@@ -221,6 +236,7 @@ function removeDetectedVideo(url: string | undefined): void {
   if (detectedVideos[normalizedUrl]) {
     delete detectedVideos[normalizedUrl];
     renderDetectedVideos();
+    syncCompanionDetection();
   }
 }
 
@@ -230,12 +246,14 @@ function addDetectedVideo(video: VideoMetadata): void {
     if (detectedVideos[removalKey]) {
       delete detectedVideos[removalKey];
       renderDetectedVideos();
+      syncCompanionDetection();
     }
     return;
   }
 
   if (upsertDetectedVideo(detectedVideos, video)) {
     renderDetectedVideos();
+    syncCompanionDetection();
   }
 }
 
@@ -587,16 +605,27 @@ async function init(): Promise<void> {
     }
   });
 
-  // Initial data load
-  await loadDownloadStates();
-  renderDownloads();
-  await requestDetectedVideos();
-  renderDetectedVideos();
+  // Browser-native detection remains the primary path. A companion build must
+  // still initialize its fallback even if a malformed legacy row cannot render.
+  try {
+    await loadDownloadStates();
+    renderDownloads();
+    await requestDetectedVideos();
+    renderDetectedVideos();
+  } catch (error) {
+    if (!__COMPANION_BUILD__) throw error;
+    console.error("Browser media detection could not render:", error);
+  }
 
   if (__COMPANION_BUILD__) {
-    await import("./companion-popup").then(({ initializeCompanionPopup }) =>
-      initializeCompanionPopup(),
+    companionPopupController = await import("./companion-popup").then(
+      ({ initializeCompanionPopup }) => initializeCompanionPopup({
+        browserMediaDetected: hasDetectedBrowserMedia(),
+      }),
     );
+    window.addEventListener("media-sniper:yt-dlp-fallback", () => {
+      void companionPopupController?.activateManualFallback();
+    });
   }
 }
 
