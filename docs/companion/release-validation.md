@@ -5,6 +5,11 @@ This checklist supplements the browser-native release gates in
 this release document; end-user installation, updates, recovery, and uninstall
 remain graphical.
 
+This checklist remains the gate for Developer ID-signed production artifacts.
+For the Pixi-first development release, periodic update prompt, and one-click
+unpacked-extension reload sequence, see
+[Media Sniper companion release finalization plan](release-finalization-plan.md).
+
 ## Compile-time separation
 
 - Build `standard` and `companion` Vite modes from clean output directories.
