@@ -12,6 +12,7 @@ import {
   extensionIdFromManifestKey,
 } from "../build/extension-variants.mjs";
 import { renderCompatibilityTable } from "./generate-compatibility.mjs";
+import { validateMv3ServiceWorker } from "./extension-isolation.mjs";
 import { releasePublicKeyRawBase64 } from "./managed-tools.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,6 +41,19 @@ async function validateBuiltManifests() {
     !companion.optional_permissions?.includes("cookies")
   ) {
     throw new Error("Companion manifest identity or permissions are invalid");
+  }
+}
+
+async function validateBuiltServiceWorkers() {
+  const [standard, companion] = await Promise.all([
+    readFile(join(projectRoot, "dist/background.js")),
+    readFile(join(projectRoot, "dist-companion/background.js")),
+  ]);
+  validateMv3ServiceWorker(standard, "Standard background service worker");
+  validateMv3ServiceWorker(companion, "Companion background service worker");
+  const companionText = companion.toString("utf8");
+  if (!companionText.includes("connectNative") || !companionText.includes(COMPANION_HOST_NAME)) {
+    throw new Error("Companion background service worker does not include native-host registration");
   }
 }
 
@@ -127,6 +141,7 @@ async function main() {
     throw new Error("macOS installer does not pin the managed-tool release key");
   }
   await validateBuiltManifests();
+  await validateBuiltServiceWorkers();
   await validateHostManifest();
   await validateCompatibility();
   await validateUserGuides();

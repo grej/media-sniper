@@ -31,7 +31,14 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       rollupOptions: {
         input: {
-          'background': resolve(__dirname, 'src/service-worker.ts'),
+          // Chromium MV3 service workers do not support dynamic import(). Use
+          // a companion-only entry so its native-host service is registered
+          // through a static module graph without leaking into the standard
+          // extension build.
+          'background': resolve(
+            __dirname,
+            isCompanion ? 'src/service-worker-companion.ts' : 'src/service-worker.ts',
+          ),
           'offscreen/offscreen': resolve(__dirname, 'src/offscreen/offscreen.html'),
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),

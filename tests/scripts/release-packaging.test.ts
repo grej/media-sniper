@@ -27,7 +27,10 @@ import {
   validateReleaseArgumentPolicy,
 } from "../../scripts/build-macos-companion-release.mjs";
 // @ts-expect-error JavaScript release helper has no declaration file.
-import { validateStandardArtifactContents } from "../../scripts/extension-isolation.mjs";
+import {
+  validateMv3ServiceWorker,
+  validateStandardArtifactContents,
+} from "../../scripts/extension-isolation.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -66,6 +69,17 @@ describe("extension release variants", () => {
       { name: "ffmpeg-core.wasm", contents: Buffer.from("Companion NativeMessaging Cookies") },
       { name: "opaque.bin", contents: Buffer.from("yt-dlp ConnectNative") },
     ], "fixture")).not.toThrow();
+  });
+
+  it("rejects dynamic imports from Chromium MV3 service workers", () => {
+    expect(() => validateMv3ServiceWorker(
+      Buffer.from('import { ready } from "./static.js"; ready();'),
+      "fixture worker",
+    )).not.toThrow();
+    expect(() => validateMv3ServiceWorker(
+      Buffer.from('void import("./companion.js")'),
+      "fixture worker",
+    )).toThrow("dynamic import");
   });
 
   it("adds companion permissions only to the companion manifest", () => {

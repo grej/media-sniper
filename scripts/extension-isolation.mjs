@@ -31,3 +31,11 @@ export function validateStandardArtifactContents(entries, label) {
     }
   }
 }
+
+/** Chromium MV3 module service workers allow static imports but not import(). */
+export function validateMv3ServiceWorker(contents, label) {
+  const text = contents.toString("utf8");
+  if (/\bimport\s*\(/.test(text)) {
+    throw new Error(`${label} contains a dynamic import unsupported by Chromium MV3 service workers`);
+  }
+}
