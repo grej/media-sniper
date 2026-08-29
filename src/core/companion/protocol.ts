@@ -208,7 +208,7 @@ function validFailure(value: unknown): boolean {
 }
 
 function validHealth(value: unknown): boolean {
-  if (!isRecord(value) || !onlyKeys(value, ["protocolVersion", "companionVersion", "browserTarget", "platform", "ytDlpVersion", "ffmpegVersion", "ffprobeVersion", "jsRuntime", "healthy", "issues", "capabilities", "braveProfiles"])) return false;
+  if (!isRecord(value) || !onlyKeys(value, ["protocolVersion", "companionVersion", "installedRelease", "browserTarget", "platform", "ytDlpVersion", "ffmpegVersion", "ffprobeVersion", "jsRuntime", "healthy", "issues", "capabilities", "braveProfiles"])) return false;
   if (value.protocolVersion !== 1 || !boundedString(value.companionVersion, 64) ||
       !["brave", "chrome", "chromium", "unknown"].includes(String(value.browserTarget)) ||
       !["macos", "windows", "linux"].includes(String(value.platform)) ||
@@ -220,6 +220,17 @@ function validHealth(value: unknown): boolean {
   if (value.jsRuntime !== undefined &&
       (!isRecord(value.jsRuntime) || !onlyKeys(value.jsRuntime, ["name", "version"]) ||
        !boundedString(value.jsRuntime.name, 64) || !boundedString(value.jsRuntime.version, 128))) return false;
+  if (value.installedRelease !== undefined) {
+    const release = value.installedRelease;
+    if (!isRecord(release) ||
+        !onlyKeys(release, ["releaseVersion", "extensionVersion", "companionVersion", "toolReleaseId", "installedAt"]) ||
+        !boundedString(release.releaseVersion, 128) ||
+        !boundedString(release.extensionVersion, 128) ||
+        !boundedString(release.companionVersion, 128) ||
+        !boundedString(release.toolReleaseId, 128) ||
+        !boundedString(release.installedAt, 64) ||
+        !Number.isFinite(Date.parse(release.installedAt))) return false;
+  }
   const capabilities = value.capabilities;
   if (!onlyKeys(capabilities, ["probe", "download", "sectionDownload", "exactClip", "currentTabCookies", "braveProfileCookies", "revealOutput"]) ||
       !Object.values(capabilities).every((entry) => typeof entry === "boolean")) return false;

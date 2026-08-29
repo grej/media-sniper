@@ -68,9 +68,18 @@ export interface CompanionHealthIssue {
   recoverable: boolean;
 }
 
+export interface InstalledReleaseInfo {
+  releaseVersion: string;
+  extensionVersion: string;
+  companionVersion: string;
+  toolReleaseId: string;
+  installedAt: string;
+}
+
 export interface CompanionHealth {
   protocolVersion: 1;
   companionVersion: string;
+  installedRelease?: InstalledReleaseInfo;
   browserTarget: "brave" | "chrome" | "chromium" | "unknown";
   platform: "macos" | "windows" | "linux";
   ytDlpVersion?: string;

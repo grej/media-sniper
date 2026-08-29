@@ -143,6 +143,11 @@ function switchView(viewId: string): void {
 function loadAboutSection(): void {
   const el = document.getElementById("about-version");
   if (el) el.textContent = chrome.runtime.getManifest().version;
+  if (__COMPANION_BUILD__) {
+    void import("./companion-update-settings").then(({ mountCompanionUpdateSettings }) => {
+      mountCompanionUpdateSettings();
+    });
+  }
 }
 
 // ─────────────────────────────────────────────

@@ -6,7 +6,10 @@ struct InstallMediaSniperCompanion {
     static func main() {
         NSApplication.shared.setActivationPolicy(.accessory)
         do {
-            try install()
+            let didInstall = try install()
+            if !didInstall {
+                Foundation.exit(2)
+            }
         } catch {
             MediaSniperInstall.alert(
                 title: "Media Sniper could not be installed",
@@ -18,7 +21,7 @@ struct InstallMediaSniperCompanion {
         }
     }
 
-    private static func install() throws {
+    private static func install() throws -> Bool {
         let manager = FileManager.default
         guard let resources = Bundle.main.resourceURL else {
             throw InstallError.missingResource("installer resources")
@@ -43,9 +46,12 @@ struct InstallMediaSniperCompanion {
             primary: "Install",
             secondary: "Cancel"
         )
-        guard prompt == .alertFirstButtonReturn else { return }
+        guard prompt == .alertFirstButtonReturn else { return false }
 
         let root = MediaSniperInstall.applicationSupport
+        let isUpgrade = manager.fileExists(
+            atPath: root.appendingPathComponent("install-receipt.json").path
+        )
         try MediaSniperInstall.createPrivateDirectory(root)
         let staging = root.appendingPathComponent(".install-\(UUID().uuidString)", isDirectory: true)
         try MediaSniperInstall.createPrivateDirectory(staging)
@@ -60,7 +66,9 @@ struct InstallMediaSniperCompanion {
 
         let stagedExtension = staging.appendingPathComponent("Extension", isDirectory: true)
         try manager.copyItem(at: extensionSource, to: stagedExtension)
-        try MediaSniperInstall.verifyCompanionExtension(at: stagedExtension)
+        let stagedExtensionVersion = try MediaSniperInstall.verifyCompanionExtension(
+            at: stagedExtension
+        )
         let extensionDestination = root.appendingPathComponent("Extension", isDirectory: true)
 
         let toolPayload = toolsSource.appendingPathComponent("payload", isDirectory: true)
@@ -155,6 +163,16 @@ struct InstallMediaSniperCompanion {
             with: Data(contentsOf: releaseMetadata)
         ) as? [String: Any]
         guard
+            let releaseVersion = installerRelease?["releaseVersion"] as? String,
+            let extensionVersion = installerRelease?["extensionVersion"] as? String,
+            let companionVersion = installerRelease?["companionVersion"] as? String,
+            let bundleVersion = Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String,
+            releaseVersion == extensionVersion,
+            extensionVersion == companionVersion,
+            extensionVersion == stagedExtensionVersion,
+            releaseVersion == bundleVersion,
             installerRelease?["extensionId"] as? String ==
                 "dioapemglpdpmfmoekckbpenmpdgkofp",
             installerRelease?["toolReleaseId"] as? String == toolReleaseID,
@@ -210,9 +228,14 @@ struct InstallMediaSniperCompanion {
             .filter { manager.fileExists(atPath: $0.path) }
             .map(\.name)
         let receipt: [String: Any] = [
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "extensionOrigin": MediaSniperInstall.extensionOrigin,
             "registeredBrowsers": browsers,
+            "releaseVersion": releaseVersion,
+            "extensionVersion": extensionVersion,
+            "companionVersion": companionVersion,
+            "toolReleaseId": toolReleaseID,
+            "installedAt": ISO8601DateFormatter().string(from: Date()),
         ]
         let receiptData = try JSONSerialization.data(
             withJSONObject: receipt,
@@ -220,12 +243,21 @@ struct InstallMediaSniperCompanion {
         )
         try receiptData.write(to: receiptDestination, options: [.atomic, .completeFileProtection])
 
-        NSWorkspace.shared.activateFileViewerSelecting([extensionDestination])
-        MediaSniperInstall.alert(
-            title: "Files installed",
-            message: "The Media Sniper extension folder is selected in Finder. If it is not already loaded, open Brave's Extensions page, enable Developer mode, choose Load unpacked, and select that folder. Then return to Media Sniper and choose Check again; the extension will verify the native connection before setup is complete.",
-            primary: "Done"
-        )
+        if isUpgrade {
+            MediaSniperInstall.alert(
+                title: "Media Sniper updated",
+                message: "Return to the Media Sniper update prompt and choose Check installation. Media Sniper will verify this release and finish the update for you.",
+                primary: "Done"
+            )
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([extensionDestination])
+            MediaSniperInstall.alert(
+                title: "Files installed",
+                message: "The Media Sniper extension folder is selected in Finder. Open Brave's Extensions page, enable Developer mode, choose Load unpacked, and select that folder. This one-time step is not needed for routine updates.",
+                primary: "Done"
+            )
+        }
+        return true
     }
 
     private static func preflightTools(root: URL) throws {

@@ -52,6 +52,7 @@ export function makeVariantManifest(baseManifest, variant) {
       "Detect, download, record, and clip web video with browser-native and local yt-dlp backends.";
     manifest.key = COMPANION_MANIFEST_KEY;
     manifest.permissions.push("nativeMessaging");
+    manifest.permissions.push("alarms");
     manifest.optional_permissions = ["cookies"];
   }
 

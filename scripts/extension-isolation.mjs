@@ -10,6 +10,10 @@ export const STANDARD_FORBIDDEN_TOKENS = [
   "native-message",
   "cookies",
   "yt-dlp",
+  "anaconda.org",
+  "api.anaconda.org",
+  "pixi exec",
+  "media-sniper-installer",
   "com.grej.media_sniper",
   "dioapemglpdpmfmoekckbpenmpdgkofp",
 ];

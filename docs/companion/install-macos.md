@@ -1,50 +1,66 @@
-# Install the Media Sniper companion on macOS
+# Install Media Sniper Companion on macOS
 
-The companion edition is designed for Brave Stable and also supports Chrome
-Stable. Installation and everyday use do not require Terminal, Homebrew,
-Python, Node, or a separately installed copy of yt-dlp or FFmpeg.
+Media Sniper Companion is designed for Brave Stable and also supports Chrome
+Stable. Pixi provides the installer in one command; it is not part of the
+installed runtime. You do not need Git, a repository checkout, Node, Rust,
+Python, Homebrew, or your own yt-dlp/FFmpeg installation.
 
 ## Install
 
-1. Download the macOS companion disk image from the Media Sniper release page.
-   Choose the Apple silicon or Intel build that matches the Mac. Release files
-   are signed and notarized; macOS checks the app before it opens.
-2. Open the disk image in Finder, then open **Install Media Sniper Companion**.
-3. Review the explanation and choose **Install**. The app installs the native
-   host and signed media tools only for the current macOS account. It registers
-   the exact Media Sniper extension origin for Brave and Chrome.
-4. Finder selects the installed extension folder. In Brave, open the Extensions
-   page, enable **Developer mode**, choose **Load unpacked**, and select that
-   folder. This off-store build has a stable extension identity even after an
-   update.
-5. Open Media Sniper and choose **Check again**. Setup is complete only when the
-   extension reports **Companion ready**. A browser restart is requested only
-   if Brave cannot refresh native-host registration while it is running.
+1. Install [Pixi](https://pixi.sh/) if it is not already available.
+2. Run this one command:
 
-If the extension says **Media tools required**, choose **Install tools**. Media
-Sniper opens the latest signed release. Run its graphical installer, return to
-Brave, and choose **Check again**. No Terminal steps are required.
+   ```bash
+   pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer
+   ```
+
+3. Complete **Install Media Sniper Companion** when the graphical installer
+   opens. It verifies the extension identity, signed release metadata, media
+   tool hashes, architecture, and tool health before replacing any active
+   component.
+4. On a fresh installation, Finder selects the installed extension folder.
+   Open Brave's Extensions page, enable **Developer mode**, choose **Load
+   unpacked**, and select that folder. This is the only routine setup step that
+   uses the Extensions page.
+5. Open Media Sniper and choose **Check again**. The extension verifies the
+   local connection before reporting that the companion is ready.
+
+The package contains an architecture-specific, ad-hoc-signed development disk
+image. It is not yet Developer ID signed or Apple notarized. You do not need an
+Apple developer account to build or use this development distribution, but
+macOS may show a trust warning. The GitHub release notes must describe this
+status accurately.
 
 ## Update
 
-Media-tool updates appear inside Media Sniper as **Update needed**. Choose
-**Get update**, run the latest signed graphical installer, return to Brave, and
-choose **Check again**. The installer activates a versioned tool set only after
-its signature, hashes, and health check pass, and retains the previous healthy
-tool set for rollback.
+Media Sniper checks for a newer installer release at most once per day. When an
+update is available, the popup shows **Media Sniper update available**.
 
-For a native-host or extension update, open the newer signed disk image and run
-the installer again. Existing downloads and the previous healthy tool release
-are preserved. Return to the extension and choose **Check again**.
+1. Choose **Copy update command** and run the copied Pixi command.
+2. Complete the graphical installer. It preserves history, downloads, output
+   receipts, settings, and the previous healthy tool release.
+3. Return to Media Sniper and choose **Check installation**. Media Sniper
+   disconnects the old native host and verifies the newly installed receipt.
+4. Choose **Finish update and refresh this page**. The extension reloads itself
+   and refreshes only the page named by the button. No Brave restart or manual
+   extension reload is needed on the normal path.
+
+**Remind me later** snoozes one release for seven days. Settings → About also
+offers **Check for updates**. Network failures remain silent and Media Sniper
+keeps the last verified update result.
+
+## What is installed
+
+Everything stays below `~/Library/Application Support/Media Sniper`. The native
+host uses its own versioned yt-dlp, FFmpeg, ffprobe, and Deno files. It neither
+reads nor replaces tools or configuration from Homebrew, Conda, Pixi, `PATH`,
+or another project. Removing Pixi's temporary execution environment after
+installation does not affect Media Sniper.
 
 ## Uninstall
 
-1. Open **Uninstall Media Sniper Companion** from the release disk image.
-2. Choose **Uninstall** in the confirmation window. It removes only Media
-   Sniper's per-user native host, managed tools, and matching browser
-   registrations. Files in **Downloads/Media Sniper** remain.
-3. On Brave's Extensions page, choose **Remove** for Media Sniper if the
-   extension should also be removed.
-
-The uninstaller refuses to delete a native-host registration whose name and
-allowed extension origin do not exactly match this release.
+Open **Uninstall Media Sniper Companion** from the matching GitHub release disk
+image and confirm removal. It removes only Media Sniper's per-user native host,
+managed tools, installed extension files, and matching browser registrations.
+Files under **Downloads/Media Sniper** remain. Remove the unpacked extension
+from Brave separately if it should no longer appear in the browser.

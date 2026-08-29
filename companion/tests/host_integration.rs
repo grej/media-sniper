@@ -15,6 +15,7 @@ struct Harness {
     _root: TempDir,
     host: Host,
     events: Arc<Mutex<Vec<Envelope>>>,
+    app: std::path::PathBuf,
     jobs: std::path::PathBuf,
     output: std::path::PathBuf,
     tools: std::path::PathBuf,
@@ -73,6 +74,7 @@ impl Harness {
             _root: root,
             host,
             events,
+            app,
             jobs,
             output,
             tools,
@@ -114,6 +116,35 @@ impl Harness {
             .unwrap()
             .to_owned()
     }
+}
+
+#[test]
+fn hello_reports_only_the_fixed_install_receipt_fields() {
+    let mut harness = Harness::new();
+    fs::write(
+        harness.app.join("install-receipt.json"),
+        serde_json::to_vec(&json!({
+            "schemaVersion": 2,
+            "extensionOrigin": "chrome-extension://dioapemglpdpmfmoekckbpenmpdgkofp/",
+            "registeredBrowsers": ["Brave Browser"],
+            "releaseVersion": "1.13.0",
+            "extensionVersion": "1.13.0",
+            "companionVersion": "1.13.0",
+            "toolReleaseId": "2026.08.29-arm64",
+            "installedAt": "2026-08-29T15:00:00Z"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    harness.send(
+        "receipt-hello",
+        "hello",
+        json!({"browserTarget":"brave","extensionVersion":"1.12.0"}),
+    );
+    let release = harness.wait("hello_result", None)["installedRelease"].clone();
+    assert_eq!(release["releaseVersion"], "1.13.0");
+    assert_eq!(release["toolReleaseId"], "2026.08.29-arm64");
+    assert!(release.get("path").is_none());
 }
 
 fn current_tab_auth(url: &str) -> Value {

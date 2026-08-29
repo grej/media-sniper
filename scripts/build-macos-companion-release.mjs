@@ -236,7 +236,9 @@ async function main() {
       await writeFile(
         join(payload, "release.json"),
         `${JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 2,
+          releaseVersion: packageMetadata.version,
+          extensionVersion: packageMetadata.version,
           companionVersion: packageMetadata.version,
           extensionId: COMPANION_EXTENSION_ID,
           toolReleaseId: toolManifest.version,

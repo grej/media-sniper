@@ -3,5 +3,7 @@
 // entry so the standard extension never includes its native-host surface.
 import "./service-worker";
 import { registerCompanionService } from "./core/companion/service";
+import { registerCompanionUpdateService } from "./core/companion/update-service";
 
 registerCompanionService();
+registerCompanionUpdateService();

@@ -92,7 +92,7 @@ enum MediaSniperInstall {
         }
     }
 
-    static func verifyCompanionExtension(at root: URL) throws {
+    static func verifyCompanionExtension(at root: URL) throws -> String {
         let data = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
         guard
             let manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -100,8 +100,11 @@ enum MediaSniperInstall {
             let keyData = Data(base64Encoded: keyText),
             let permissions = manifest["permissions"] as? [String],
             permissions.contains("nativeMessaging"),
+            permissions.contains("alarms"),
             let optionalPermissions = manifest["optional_permissions"] as? [String],
-            optionalPermissions == ["cookies"]
+            optionalPermissions == ["cookies"],
+            let version = manifest["version"] as? String,
+            version.range(of: "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", options: .regularExpression) != nil
         else { throw ReleaseVerificationError.invalidExtension }
         let digest = SHA256.hash(data: keyData)
         let alphabet = Array("abcdefghijklmnop")
@@ -111,6 +114,7 @@ enum MediaSniperInstall {
         guard String(identifier) == "dioapemglpdpmfmoekckbpenmpdgkofp" else {
             throw ReleaseVerificationError.invalidExtension
         }
+        return version
     }
 
     static func verifyToolPayload(root: URL, manifestData: Data) throws -> String {

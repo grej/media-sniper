@@ -38,9 +38,32 @@ async function validateBuiltManifests() {
     companion.key !== COMPANION_MANIFEST_KEY ||
     extensionIdFromManifestKey(companion.key) !== COMPANION_EXTENSION_ID ||
     !companion.permissions?.includes("nativeMessaging") ||
+    !companion.permissions?.includes("alarms") ||
     !companion.optional_permissions?.includes("cookies")
   ) {
     throw new Error("Companion manifest identity or permissions are invalid");
+  }
+}
+
+async function validateCondaInstaller() {
+  const packageMetadata = await readJson(join(projectRoot, "package.json"));
+  const recipe = await readFile(join(projectRoot, "recipe/recipe.yaml"), "utf8");
+  const cargoManifest = await readFile(join(projectRoot, "companion/Cargo.toml"), "utf8");
+  const launcher = await readFile(
+    join(projectRoot, "packaging/conda/media-sniper-installer"),
+    "utf8",
+  );
+  if (!recipe.includes("name: media-sniper-installer") ||
+      !recipe.includes(`version: "${packageMetadata.version}"`) ||
+      /post[-_]link|run_post_link/i.test(recipe + launcher)) {
+    throw new Error("Clone-free Conda installer recipe is missing, stale, or uses post-link behavior");
+  }
+  if (!cargoManifest.includes(`version = "${packageMetadata.version}"`)) {
+    throw new Error("Native host is outside the atomic Media Sniper version train");
+  }
+  if (!launcher.includes("install-receipt.json") ||
+      !launcher.includes("Install Media Sniper Companion.app")) {
+    throw new Error("Conda launcher does not verify the graphical installation");
   }
 }
 
@@ -107,10 +130,13 @@ async function validateUserGuides() {
   ];
   for (const relativePath of guides) {
     const contents = await readFile(await requireFile(relativePath), "utf8");
-    if (/```(?:sh|bash|zsh|console)|\bbrew install\b|\bsudo\b|\bchmod\b/i.test(contents)) {
-      throw new Error(`End-user guide contains a terminal instruction: ${relativePath}`);
+    if (/\bbrew install\b|\bsudo\b|\bchmod\b|\bgit clone\b|\bpip install\b/i.test(contents)) {
+      throw new Error(`End-user guide contains an unsupported installation command: ${relativePath}`);
     }
   }
+  const installGuide = await readFile(join(projectRoot, "docs/companion/install-macos.md"), "utf8");
+  const expected = "pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer";
+  if (!installGuide.includes(expected)) throw new Error("Install guide omits the reviewed Pixi command");
 }
 
 async function main() {
@@ -122,6 +148,8 @@ async function main() {
     requireFile("scripts/extension-isolation.mjs"),
     requireFile("scripts/managed-tools.mjs"),
     requireFile("packaging/companion/THIRD_PARTY_NOTICES.md"),
+    requireFile("recipe/recipe.yaml"),
+    requireFile("packaging/conda/media-sniper-installer"),
   ]);
   const publicKey = createPublicKey(
     await readFile(join(projectRoot, "packaging/managed-tools/release-public-key.pem"), "utf8"),
@@ -145,9 +173,10 @@ async function main() {
   await validateHostManifest();
   await validateCompatibility();
   await validateUserGuides();
+  await validateCondaInstaller();
   console.log(`Validated extension identity ${COMPANION_EXTENSION_ID}`);
   console.log(`Validated exact native origin ${COMPANION_EXTENSION_ORIGIN}`);
-  console.log("Validated release metadata, notices, GUI sources, and no-terminal user guides");
+  console.log("Validated release metadata, notices, GUI sources, and the reviewed one-command install guide");
 }
 
 await main();

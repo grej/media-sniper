@@ -168,6 +168,15 @@ target. See the [graphical installation guide](docs/companion/install-macos.md),
 retains the browser-native feature set and contains no companion code,
 permissions, or user interface.
 
+Users install or update the companion without cloning this repository:
+
+```bash
+pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer
+```
+
+Pixi only launches the verified graphical installer. Media Sniper then uses
+project-private, versioned tools and never replaces a user's existing yt-dlp.
+
 ## Usage
 
 ### Manual Download

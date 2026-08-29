@@ -273,12 +273,7 @@ fn normalize_probe(
             .get("has_drm")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-    let estimate = object
-        .get("filesize_approx")
-        .or_else(|| object.get("filesize"))
-        .and_then(Value::as_u64)
-        .or_else(|| estimate_from_formats(object.get("formats")));
-    let selections = build_selections(estimate);
+    let selections = build_selections(object.get("formats"), duration_ms);
     let token = opaque_token("probe")?;
     let probed_at = now_ms();
     let thumbnail_url = object
@@ -341,7 +336,11 @@ fn normalize_probe(
     Ok((summary, record))
 }
 
-fn build_selections(estimate: Option<u64>) -> HashMap<String, CachedSelection> {
+fn build_selections(
+    formats: Option<&Value>,
+    duration_ms: Option<u64>,
+) -> HashMap<String, CachedSelection> {
+    let estimates = selection_estimates(formats, duration_ms);
     [
         (
             "best",
@@ -381,7 +380,7 @@ fn build_selections(estimate: Option<u64>) -> HashMap<String, CachedSelection> {
                 key: key.to_owned(),
                 label: label.to_owned(),
                 selector: selector.to_owned(),
-                estimated_bytes: estimate,
+                estimated_bytes: estimates.get(key).copied().flatten(),
                 expected_container: container.map(str::to_owned),
                 audio_only,
             },
@@ -390,18 +389,121 @@ fn build_selections(estimate: Option<u64>) -> HashMap<String, CachedSelection> {
     .collect()
 }
 
-fn estimate_from_formats(formats: Option<&Value>) -> Option<u64> {
-    formats
+fn selection_estimates(
+    formats: Option<&Value>,
+    duration_ms: Option<u64>,
+) -> HashMap<&'static str, Option<u64>> {
+    let formats = formats
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|format| {
-            format
-                .get("filesize")
-                .or_else(|| format.get("filesize_approx"))
-                .and_then(Value::as_u64)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let best_audio = last_format_size(formats, duration_ms, |format| {
+        has_audio(format) && !has_video(format)
+    });
+    let best_combined = last_format_size(formats, duration_ms, |format| {
+        has_audio(format) && has_video(format)
+    });
+    let best_video = last_format_size(formats, duration_ms, |format| {
+        has_video(format) && !has_audio(format)
+    });
+    let best_mp4_video = last_format_size(formats, duration_ms, |format| {
+        has_video(format)
+            && !has_audio(format)
+            && format.get("ext").and_then(Value::as_str) == Some("mp4")
+    });
+    let best_m4a_audio = last_format_size(formats, duration_ms, |format| {
+        has_audio(format)
+            && !has_video(format)
+            && matches!(
+                format.get("ext").and_then(Value::as_str),
+                Some("m4a" | "mp4")
+            )
+    });
+    let best_mp4_combined = last_format_size(formats, duration_ms, |format| {
+        has_audio(format)
+            && has_video(format)
+            && format.get("ext").and_then(Value::as_str) == Some("mp4")
+    });
+    let capped = |maximum_height: u64| {
+        let video = last_format_size(formats, duration_ms, |format| {
+            has_video(format)
+                && !has_audio(format)
+                && format
+                    .get("height")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|height| height <= maximum_height)
+        });
+        let combined = last_format_size(formats, duration_ms, |format| {
+            has_video(format)
+                && has_audio(format)
+                && format
+                    .get("height")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|height| height <= maximum_height)
+        });
+        sum_sizes(video, best_audio).or(combined)
+    };
+    HashMap::from([
+        ("best", sum_sizes(best_video, best_audio).or(best_combined)),
+        (
+            "best-mp4",
+            sum_sizes(best_mp4_video, best_m4a_audio)
+                .or(best_mp4_combined)
+                .or(sum_sizes(best_video, best_audio))
+                .or(best_combined),
+        ),
+        ("up-to-1080p", capped(1080)),
+        ("up-to-720p", capped(720)),
+        ("audio-only", best_audio.or(best_combined)),
+    ])
+}
+
+fn last_format_size(
+    formats: &[Value],
+    duration_ms: Option<u64>,
+    predicate: impl Fn(&serde_json::Map<String, Value>) -> bool,
+) -> Option<u64> {
+    formats.iter().rev().find_map(|format| {
+        let object = format.as_object()?;
+        predicate(object)
+            .then(|| estimated_format_size(object, duration_ms))
+            .flatten()
+    })
+}
+
+fn estimated_format_size(
+    format: &serde_json::Map<String, Value>,
+    duration_ms: Option<u64>,
+) -> Option<u64> {
+    format
+        .get("filesize")
+        .or_else(|| format.get("filesize_approx"))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            let bitrate_kbps = finite_nonnegative(format.get("tbr"))?;
+            let duration_seconds = duration_ms? as f64 / 1000.0;
+            let bytes = bitrate_kbps * 1000.0 / 8.0 * duration_seconds;
+            (bytes.is_finite() && bytes >= 0.0 && bytes <= u64::MAX as f64)
+                .then_some(bytes.round() as u64)
         })
-        .max()
+}
+
+fn has_video(format: &serde_json::Map<String, Value>) -> bool {
+    format
+        .get("vcodec")
+        .and_then(Value::as_str)
+        .is_some_and(|codec| codec != "none")
+}
+
+fn has_audio(format: &serde_json::Map<String, Value>) -> bool {
+    format
+        .get("acodec")
+        .and_then(Value::as_str)
+        .is_some_and(|codec| codec != "none")
+}
+
+fn sum_sizes(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    left?.checked_add(right?)
 }
 
 fn finite_nonnegative(value: Option<&Value>) -> Option<f64> {
@@ -551,6 +653,44 @@ mod tests {
         .unwrap();
         assert!(record.selection("best").is_ok());
         assert!(record.selection("best --exec touch /tmp/bad").is_err());
+    }
+
+    #[test]
+    fn preset_estimates_follow_the_formats_each_selector_would_transfer() {
+        let (summary, _) = normalize_probe(
+            json!({
+                "id": "sizes",
+                "title": "Different sizes",
+                "duration": 100.0,
+                "formats": [
+                    {"format_id":"audio-low","vcodec":"none","acodec":"aac","ext":"m4a","filesize":1_000},
+                    {"format_id":"audio-best","vcodec":"none","acodec":"aac","ext":"m4a","filesize":2_000},
+                    {"format_id":"360","vcodec":"h264","acodec":"none","ext":"mp4","height":360,"filesize":4_000},
+                    {"format_id":"720","vcodec":"h264","acodec":"none","ext":"mp4","height":720,"filesize":8_000},
+                    {"format_id":"1080","vcodec":"h264","acodec":"none","ext":"mp4","height":1080,"filesize":12_000},
+                    {"format_id":"2160","vcodec":"vp9","acodec":"none","ext":"webm","height":2160,"filesize":30_000}
+                ]
+            }),
+            "https://example.com/sizes".into(),
+            false,
+        )
+        .unwrap();
+        let estimates = summary
+            .selections
+            .iter()
+            .map(|selection| match selection {
+                SelectionOption::Preset {
+                    key,
+                    estimated_bytes,
+                    ..
+                } => (key.as_str(), *estimated_bytes),
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(estimates["best"], Some(32_000));
+        assert_eq!(estimates["best-mp4"], Some(14_000));
+        assert_eq!(estimates["up-to-1080p"], Some(14_000));
+        assert_eq!(estimates["up-to-720p"], Some(10_000));
+        assert_eq!(estimates["audio-only"], Some(2_000));
     }
 
     #[test]

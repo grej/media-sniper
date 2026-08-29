@@ -87,9 +87,11 @@ describe("extension release variants", () => {
     const companion = makeVariantManifest(baseManifest, "companion");
     expect(standard.key).toBeUndefined();
     expect(standard.permissions).not.toContain("nativeMessaging");
+    expect(standard.permissions).not.toContain("alarms");
     expect(standard.optional_permissions).toBeUndefined();
     expect(companion.key).toBe(COMPANION_MANIFEST_KEY);
     expect(companion.permissions).toContain("nativeMessaging");
+    expect(companion.permissions).toContain("alarms");
     expect(companion.optional_permissions).toEqual(["cookies"]);
   });
 

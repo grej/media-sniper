@@ -10,6 +10,39 @@ For the Pixi-first development release, periodic update prompt, and one-click
 unpacked-extension reload sequence, see
 [Media Sniper companion release finalization plan](release-finalization-plan.md).
 
+## Pixi and Anaconda candidate
+
+- Build the architecture-specific development DMG from the frozen release
+  commit, then stage it with `npm run package:conda:stage -- --dmg <dmg> --subdir
+  <osx-arm64|osx-64>`.
+- Run `pixi run package:conda` and `pixi run package:conda:inspect`. Confirm the
+  package contains the graphical DMG, fixed launcher, release/subdir markers,
+  and no post-link script or runtime dependencies.
+- From the local channel, run `pixi run package:conda:local-test` in a clean
+  macOS account. After installation, remove the temporary Pixi exec environment
+  and confirm Media Sniper still probes, downloads, and clips.
+- Build and inspect both macOS subdirs before `pixi run
+  package:conda:upload-candidate`. Promote the exact tested files with `pixi run
+  package:conda:upload-main`; do not rebuild between candidate testing and main.
+- Record that the development DMG is ad-hoc signed and not notarized. Do not use
+  the production-signing checklist below to imply Developer ID trust for this
+  Pixi-first artifact.
+
+## Update and reload acceptance
+
+- Confirm startup creates one randomized 5–30 minute alarm and subsequent
+  checks remain throttled for 24 hours.
+- Test offline, timeout, oversized, malformed, wrong-owner, wrong-package,
+  prerelease, downgrade, missing-subdir, and non-main-label responses. None may
+  change an installed component or render remote text.
+- Install release N+1 while N is executing. **Check installation** must restart
+  the native connection and show **Finish update** only when the receipt, host,
+  tools, and extension versions agree and health is green.
+- Start a browser and companion download and confirm each blocks **Finish
+  update**. After completion, verify one click reloads the extension and only
+  the explicitly named current HTTP(S) tab. Confirm an expired or mismatched
+  marker refreshes no tab.
+
 ## Compile-time separation
 
 - Build `standard` and `companion` Vite modes from clean output directories.

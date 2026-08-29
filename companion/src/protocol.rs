@@ -213,11 +213,24 @@ pub struct BraveProfile {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct InstalledReleaseInfo {
+    pub release_version: String,
+    pub extension_version: String,
+    pub companion_version: String,
+    pub tool_release_id: String,
+    pub installed_at: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelloResult {
     pub protocol_version: u32,
     pub companion_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_release: Option<InstalledReleaseInfo>,
     pub browser_target: BrowserTarget,
     pub platform: String,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -23,7 +23,9 @@
     "package:check:standard": "node scripts/package.mjs --check --variant standard",
     "package:check:companion": "node scripts/package.mjs --check --variant companion",
     "release:check": "node scripts/check-companion-release.mjs",
-    "compatibility:generate": "node scripts/generate-compatibility.mjs"
+    "compatibility:generate": "node scripts/generate-compatibility.mjs",
+    "package:conda:stage": "node scripts/stage-conda-installer.mjs",
+    "package:conda:check": "node scripts/check-conda-installer.mjs"
   },
   "keywords": [
     "browser-extension",

@@ -14,6 +14,7 @@ function installChrome(sendMessage: (message: { type: string; payload?: unknown 
   vi.stubGlobal("chrome", {
     runtime: {
       sendMessage,
+      getManifest: () => ({ version: "1.0.0" }),
       onMessage: { addListener: vi.fn() },
     },
     tabs: { create: vi.fn(async () => ({})) },
@@ -152,9 +153,39 @@ describe("companion popup", () => {
     });
     const { initializeCompanionPopup } = await import("@/popup/companion-popup");
     await initializeCompanionPopup({ browserMediaDetected: false });
-    expect(document.body.textContent).toContain("Update needed");
-    expect(document.body.textContent).toContain("Get update");
+    expect(document.body.textContent).toContain("Media Sniper update needed");
+    expect(document.body.textContent).toContain("Copy update command");
+    expect(document.body.textContent).toContain("Check installation");
     expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
+  });
+
+  it("shows the release banner without displacing browser media and copies only the fixed command", async () => {
+    const send = vi.fn(async ({ type }: { type: string }) => {
+      if (type === "COMPANION_UPDATE_GET_STATE") return {
+        success: true,
+        data: {
+          currentVersion: "1.12.0",
+          latestVersion: "1.13.0",
+          updateAvailable: true,
+          checking: false,
+        },
+      };
+      return { success: true, data: {} };
+    });
+    installChrome(send);
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { initializeCompanionPopup } = await import("@/popup/companion-popup");
+    await initializeCompanionPopup({ browserMediaDetected: true });
+    expect(document.body.textContent).toContain("Media Sniper update available");
+    expect(document.body.textContent).toContain("Try yt-dlp for this page");
+    const copy = [...document.querySelectorAll("button")]
+      .find((item) => item.textContent === "Copy update command");
+    copy?.click();
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(
+      "pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer",
+    ));
+    expect(document.body.textContent).toContain("Pixi is not part of the installed runtime");
   });
 
   it("keeps the first signed-in retry focused on the active Brave session", async () => {

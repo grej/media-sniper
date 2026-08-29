@@ -339,6 +339,13 @@ async function checkHealth(): Promise<CompanionHealth> {
   return health;
 }
 
+/** Restart the native connection so Brave launches the currently installed host. */
+export async function restartCompanionConnection(): Promise<CompanionHealth> {
+  client.disconnect();
+  health = null;
+  return await checkHealth();
+}
+
 async function stateForActiveTab(): Promise<{ health: CompanionHealth | null; summaries: YtDlpMediaSummary[] }> {
   try {
     const tab = await activeHttpTab();

@@ -5,8 +5,8 @@ use crate::jobs::{
 use crate::probe::{probe, ProbeCache};
 use crate::protocol::{
     CancelJobRequest, CapabilitySet, Envelope, ErrorCode, HelloRequest, HelloResult, HostError,
-    JobFailed, JobQueued, JobState, OutputActionRequest, ProbeRequest, StartClipRequest,
-    StartDownloadRequest, PROTOCOL_VERSION,
+    InstalledReleaseInfo, JobFailed, JobQueued, JobState, OutputActionRequest, ProbeRequest,
+    StartClipRequest, StartDownloadRequest, PROTOCOL_VERSION,
 };
 use crate::runner::ProcessRunner;
 use crate::security::{create_private_dir, redact_diagnostic};
@@ -21,6 +21,58 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+const MAX_INSTALL_RECEIPT_BYTES: u64 = 16 * 1024;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+struct InstallReceipt {
+    schema_version: u32,
+    extension_origin: String,
+    registered_browsers: Vec<String>,
+    release_version: String,
+    extension_version: String,
+    companion_version: String,
+    tool_release_id: String,
+    installed_at: String,
+}
+
+fn read_installed_release(app_root: &Path) -> Option<InstalledReleaseInfo> {
+    let path = app_root.join("install-receipt.json");
+    let metadata = fs::metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_INSTALL_RECEIPT_BYTES {
+        return None;
+    }
+    let receipt: InstallReceipt = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    if receipt.schema_version != 2
+        || receipt.extension_origin != "chrome-extension://dioapemglpdpmfmoekckbpenmpdgkofp/"
+        || receipt.registered_browsers.len() > 16
+        || !safe_release_value(&receipt.release_version)
+        || !safe_release_value(&receipt.extension_version)
+        || !safe_release_value(&receipt.companion_version)
+        || !safe_release_value(&receipt.tool_release_id)
+        || receipt.installed_at.len() < 20
+        || receipt.installed_at.len() > 64
+    {
+        return None;
+    }
+    Some(InstalledReleaseInfo {
+        release_version: receipt.release_version,
+        extension_version: receipt.extension_version,
+        companion_version: receipt.companion_version,
+        tool_release_id: receipt.tool_release_id,
+        installed_at: receipt.installed_at,
+    })
+}
+
+fn safe_release_value(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'+'))
+}
 
 #[derive(Clone)]
 pub struct CompanionConfig {
@@ -324,6 +376,7 @@ impl Host {
             HelloResult {
                 protocol_version: PROTOCOL_VERSION,
                 companion_version: env!("CARGO_PKG_VERSION").to_owned(),
+                installed_release: read_installed_release(&self.config.app_root),
                 browser_target: request.browser_target,
                 platform: platform_name().to_owned(),
                 yt_dlp_version: health.yt_dlp_version,

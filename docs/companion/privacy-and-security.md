@@ -52,6 +52,18 @@ managed runtime must remain patched and tightly configured.
 
 ## Installation and updates
 
+The companion build requests the `alarms` permission to check one fixed HTTPS
+Anaconda API record for `gjennings/media-sniper-installer`. A check sends no
+page URL, media URL, cookie, history, identifier, or analytics. Remote data is
+accepted only as advisory version/platform metadata; it cannot provide a
+command, executable path, channel, link, or native-host request. The Pixi
+update command displayed by the extension is compiled into Media Sniper.
+
+Pixi is used only to transport and launch the graphical installer. The package
+does not use Conda post-link scripts. After verification, runtime components
+are copied into Media Sniper's private application-support directory, so a
+temporary Pixi environment can be removed without affecting downloads.
+
 The companion extension has a checked public manifest key and the stable ID
 `dioapemglpdpmfmoekckbpenmpdgkofp`. The native-host manifest allows only the
 exact origin `chrome-extension://dioapemglpdpmfmoekckbpenmpdgkofp/`; wildcard
@@ -69,7 +81,7 @@ component downloads from npm and GitHub.
 The standard Web Store candidate is compiled separately. Its release check
 case-insensitively rejects generic and concrete companion identifiers—including
 native-messaging APIs, the host name, stable extension ID, `COMPANION_` message
-names, `yt-dlp`, and cookie permission markers—in emitted JavaScript and textual
+names, `yt-dlp`, the Anaconda API origin, the Pixi command, and cookie permission markers—in emitted JavaScript and textual
 resources, in addition to inspecting manifest permissions. Opaque vendored
 WASM, images, and fonts are checked as pinned binary dependencies rather than
 searched for unrelated diagnostic words.

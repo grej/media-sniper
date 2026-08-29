@@ -1,7 +1,7 @@
 # Media Sniper companion release finalization plan
 
-- **Status:** Proposed for implementation
-- **Target:** The next minor release after `1.12.0` (provisionally `1.13.0`)
+- **Status:** Accepted and implemented for release validation
+- **Target:** `1.13.0`
 - **Primary browser:** Brave Stable on macOS
 - **Primary distribution:** One-line Pixi installer from `anaconda.org/gjennings`
 - **Fallback distribution:** Development DMG and extension ZIPs on GitHub Releases

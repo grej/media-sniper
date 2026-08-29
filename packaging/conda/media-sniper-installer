@@ -1,0 +1,86 @@
+#!/bin/sh
+set -u
+
+installer_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+package_root=$(CDPATH= cd -- "$installer_dir/.." && pwd)
+payload_root="$package_root/share/media-sniper-installer"
+dmg_path="$payload_root/media-sniper-companion.dmg"
+expected_subdir=$(sed -n '1p' "$payload_root/target-subdir")
+expected_version=$(sed -n '1p' "$payload_root/release-version")
+
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "Media Sniper Companion can currently be installed only on macOS." >&2
+  exit 1
+fi
+
+machine_arch=$(uname -m)
+case "$expected_subdir:$machine_arch" in
+  osx-arm64:arm64|osx-64:x86_64) ;;
+  *)
+    echo "This Media Sniper installer does not match this Mac." >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -f "$dmg_path" ]; then
+  echo "The Media Sniper installer payload is incomplete. Re-run the Pixi install command." >&2
+  exit 1
+fi
+
+mount_dir=$(mktemp -d "${TMPDIR:-/tmp}/media-sniper-installer.XXXXXX") || exit 1
+mounted=0
+cleanup() {
+  if [ "$mounted" -eq 1 ]; then
+    /usr/bin/hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+  fi
+  /bin/rm -rf "$mount_dir"
+}
+trap cleanup EXIT HUP INT TERM
+
+mounted=1
+if ! /usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$dmg_path" >/dev/null; then
+  echo "The Media Sniper disk image could not be opened. Re-run the Pixi install command." >&2
+  exit 1
+fi
+
+installer_app="$mount_dir/Install Media Sniper Companion.app/Contents/MacOS/InstallMediaSniperCompanion"
+if [ ! -x "$installer_app" ]; then
+  echo "The Media Sniper graphical installer is missing from its package." >&2
+  exit 1
+fi
+
+"$installer_app"
+installer_status=$?
+if [ "$installer_status" -eq 2 ]; then
+  echo "Media Sniper installation was cancelled." >&2
+  exit 2
+fi
+if [ "$installer_status" -ne 0 ]; then
+  echo "Media Sniper was not changed. Re-run the Pixi install command to try again." >&2
+  exit "$installer_status"
+fi
+
+installed_root="$HOME/Library/Application Support/Media Sniper"
+receipt="$installed_root/install-receipt.json"
+host="$installed_root/Companion/host/media-sniper-companion"
+extension_manifest="$installed_root/Extension/manifest.json"
+active_version_file="$installed_root/tools/active-version"
+if [ ! -f "$receipt" ] || [ ! -x "$host" ] || [ ! -f "$extension_manifest" ] || [ ! -f "$active_version_file" ]; then
+  echo "The graphical installer did not complete. Your previous Media Sniper installation remains available." >&2
+  exit 1
+fi
+
+installed_version=$(/usr/bin/plutil -extract releaseVersion raw -o - "$receipt" 2>/dev/null || true)
+active_version=$(sed -n '1p' "$active_version_file")
+case "$active_version" in
+  ""|*[!A-Za-z0-9._+-]*)
+    echo "The installed Media Sniper tool receipt is invalid." >&2
+    exit 1
+    ;;
+esac
+if [ "$installed_version" != "$expected_version" ] || [ ! -d "$installed_root/tools/versions/$active_version/bin" ]; then
+  echo "The installed Media Sniper release could not be verified. Your previous release was not removed." >&2
+  exit 1
+fi
+
+echo "Media Sniper $installed_version is installed. Return to the extension and choose Check installation."

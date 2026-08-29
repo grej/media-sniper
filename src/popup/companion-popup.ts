@@ -10,6 +10,10 @@ import { companionFailureMessage } from "../core/companion/failure-messages";
 import type { ClipEditorController, ClipEditorSubmit } from "./clip-editor";
 import { createPageClipEditor } from "./clip-actions";
 import { formatFileSize } from "./utils";
+import {
+  MEDIA_SNIPER_UPDATE_COMMAND,
+  type UpdateViewState,
+} from "../core/companion/update";
 
 const MSG = {
   health: "COMPANION_HEALTH",
@@ -23,6 +27,12 @@ const MSG = {
   installTools: "COMPANION_INSTALL_TOOLS",
   updateTools: "COMPANION_UPDATE_TOOLS",
   changed: "COMPANION_STATE_CHANGED",
+  updateState: "COMPANION_UPDATE_GET_STATE",
+  updateCheck: "COMPANION_UPDATE_CHECK",
+  updateSnooze: "COMPANION_UPDATE_SNOOZE",
+  updateCheckInstallation: "COMPANION_UPDATE_CHECK_INSTALLATION",
+  updateFinish: "COMPANION_UPDATE_FINISH",
+  updateChanged: "COMPANION_UPDATE_CHANGED",
 } as const;
 
 type AuthChoice = { authMode: "anonymous" | "current-tab" | "brave-profile"; profileId?: string };
@@ -50,6 +60,10 @@ let fallback: CompanionFallback | null = null;
 let lastClip: { probeToken: string; selectionKey: string; startMs: number; endMs: number; mode: "fast" | "exact" } | null = null;
 let companionClipEditor: ClipEditorController | null = null;
 let renderGeneration = 0;
+let updateState: UpdateViewState | null = null;
+let updateBusy = false;
+let updateCommandCopied = false;
+let healthUpdateRequired = false;
 
 async function send<T>(type: string, payload: Record<string, unknown> = {}): Promise<T> {
   const response = await chrome.runtime.sendMessage({ type, payload });
@@ -85,6 +99,9 @@ function setError(value: unknown): void {
     message: companionFailureMessage(code),
     recoverable: candidate.recoverable ?? true,
   };
+  if (code === "TOOLS_MISSING" || code === "TOOLS_INCOMPATIBLE" || code === "PROTOCOL_MISMATCH") {
+    healthUpdateRequired = true;
+  }
 }
 
 async function perform(action: () => Promise<void>): Promise<void> {
@@ -96,6 +113,16 @@ async function perform(action: () => Promise<void>): Promise<void> {
 async function checkHealth(): Promise<void> {
   await perform(async () => {
     health = await send<CompanionHealth>(MSG.health);
+    const extensionVersion = chrome.runtime.getManifest().version;
+    healthUpdateRequired = health.issues.some((issue) =>
+      issue.code === "TOOLS_MISSING" || issue.code === "TOOLS_INCOMPATIBLE" || issue.code === "PROTOCOL_MISMATCH") ||
+      health.companionVersion !== extensionVersion || Boolean(
+        health.installedRelease && (
+          health.installedRelease.releaseVersion !== extensionVersion ||
+          health.installedRelease.extensionVersion !== health.installedRelease.releaseVersion ||
+          health.installedRelease.companionVersion !== health.companionVersion
+        ),
+      );
     if (!health.healthy) return;
     const state = await send<{ summaries?: YtDlpMediaSummary[] }>(MSG.state);
     summary = state.summaries?.[0] ?? null;
@@ -104,6 +131,75 @@ async function checkHealth(): Promise<void> {
       authChoice = { authMode: "anonymous" };
     }
   });
+}
+
+async function updateAction(type: string): Promise<void> {
+  updateBusy = true;
+  await render();
+  try {
+    updateState = await send<UpdateViewState>(type);
+  } catch (caught) {
+    updateState = {
+      ...(updateState ?? { currentVersion: chrome.runtime.getManifest().version, updateAvailable: true, checking: false }),
+      error: typeof caught === "string" ? caught : "The update action could not be completed.",
+    };
+  } finally {
+    updateBusy = false;
+    await render();
+  }
+}
+
+async function copyUpdateCommand(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(MEDIA_SNIPER_UPDATE_COMMAND);
+    updateCommandCopied = true;
+  } catch {
+    updateState = {
+      ...(updateState ?? { currentVersion: chrome.runtime.getManifest().version, updateAvailable: true, checking: false }),
+      error: "Could not copy the update command. Open Settings → About for installation help.",
+    };
+  }
+  await render();
+}
+
+function updateBanner(container: HTMLElement): void {
+  if (!updateState || (!updateState.updateAvailable && !healthUpdateRequired &&
+      !updateState.installationChecked && !updateState.finishReady)) return;
+  const card = document.createElement("section");
+  card.className = "companion-card companion-update";
+  card.append(text(
+    "companion-title",
+    updateState.updateAvailable ? "Media Sniper update available" : "Media Sniper update needed",
+  ));
+  card.append(text("companion-copy", "Includes newer site support and media tools."));
+  card.append(button(updateCommandCopied ? "Update command copied" : "Copy update command", copyUpdateCommand));
+  card.append(button("Check installation", () => updateAction(MSG.updateCheckInstallation), true));
+  if (updateState.updateAvailable && !healthUpdateRequired) {
+    card.append(button("Remind me later", () => updateAction(MSG.updateSnooze), true));
+  }
+  if (updateCommandCopied) {
+    card.append(text(
+      "companion-privacy",
+      "Run the copied Pixi command once, complete the graphical installer, then return here and choose Check installation. Pixi is not part of the installed runtime.",
+    ));
+  }
+  if (updateBusy || updateState.checking) card.append(text("companion-loading", "Checking the local installation…"));
+  if (updateState.busyReason) card.append(text("companion-warning", updateState.busyReason));
+  if (updateState.error) card.append(text("companion-warning", updateState.error));
+  if (updateState.finishReady) {
+    card.append(button(
+      "Finish update and refresh this page",
+      () => updateAction(MSG.updateFinish),
+    ));
+    card.append(text(
+      "companion-privacy",
+      `Release ${updateState.installedVersion ?? ""} is installed and healthy. This reloads Media Sniper and only the current page.`,
+    ));
+  }
+  for (const control of card.querySelectorAll<HTMLButtonElement>("button")) {
+    control.disabled = updateBusy;
+  }
+  container.append(card);
 }
 
 function fallbackActive(): boolean {
@@ -244,6 +340,7 @@ function manualFallbackView(container: HTMLElement): void {
 }
 
 function healthView(container: HTMLElement): void {
+  if (healthUpdateRequired) return;
   if (health?.healthy && (busy || summary || error)) return;
   if (!health && (busy || error)) return;
 
@@ -288,6 +385,7 @@ function healthView(container: HTMLElement): void {
 
 function errorView(container: HTMLElement): void {
   if (!error) return;
+  if (["TOOLS_MISSING", "TOOLS_INCOMPATIBLE", "PROTOCOL_MISMATCH"].includes(error.code) && healthUpdateRequired) return;
   const card = document.createElement("section");
   card.className = "companion-card companion-error";
   const title = ({
@@ -528,6 +626,7 @@ async function render(): Promise<void> {
   const generation = ++renderGeneration;
   destroyCompanionClipEditor();
   root.replaceChildren();
+  updateBanner(root);
   browserList.hidden = fallbackActive();
   if (!fallbackActive()) {
     manualFallbackView(root);
@@ -559,6 +658,7 @@ function installStyles(): void {
     .companion-switcher{display:flex;justify-content:flex-end;margin:4px 0}
     .companion-section-heading,.companion-kicker{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-tertiary);margin:8px 0}
     .companion-card{display:block;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-2)}
+    .companion-update{border-color:var(--accent)}
     .companion-title{font-weight:600;color:var(--text-primary);margin-bottom:4px;overflow-wrap:anywhere}
     .companion-copy,.companion-privacy,.companion-warning{color:var(--text-secondary);font-size:11px;line-height:1.4;margin:5px 0}
     .companion-privacy{color:var(--text-tertiary)}.companion-warning{color:var(--warning)}.companion-error{border-color:var(--error)}
@@ -600,6 +700,12 @@ export async function initializeCompanionPopup(
   root = document.createElement("div"); root.id = "companionPanel";
   list.insertAdjacentElement("afterend", root);
   chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === MSG.updateChanged) {
+      void send<UpdateViewState>(MSG.updateState)
+        .then((state) => { updateState = state; })
+        .finally(() => void render());
+      return;
+    }
     if (message?.type !== MSG.changed) return;
     if (message.payload?.activeTabChanged === true) {
       error = null; fallback = null; lastClip = null; manualFallbackRequested = false;
@@ -614,6 +720,7 @@ export async function initializeCompanionPopup(
     if ((message.payload as ErrorView)?.code) setError(message.payload);
     void render();
   });
+  updateState = await send<UpdateViewState>(MSG.updateState).catch(() => null);
   await render();
   if (!browserMediaDetected) await checkHealth();
   return controller;

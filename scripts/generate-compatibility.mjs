@@ -26,8 +26,8 @@ export function renderCompatibilityTable(metadata, toolManifest) {
     ? `${tools.youtubeSolver.provider} ${tools.youtubeSolver.version}, embedded in the pinned official yt-dlp executable; remote fetching disabled`
     : "Exact embedded version recorded with the pinned official yt-dlp executable; remote fetching disabled";
   const rows = [
-    ["Companion extension", `${metadata.extension.companionVersion}; stable ID \`${metadata.extension.companionExtensionId}\``],
-    ["Native host", `${metadata.nativeHost.companionVersion} on ${metadata.nativeHost.platform} ${metadata.nativeHost.architectures.join(" and ")}`],
+    ["Companion extension", `${metadata.extension.companionVersion}; stable ID \`${metadata.extension.companionExtensionId}\` <!-- x-release-please-version -->`],
+    ["Native host", `${metadata.nativeHost.companionVersion} on ${metadata.nativeHost.platform} ${metadata.nativeHost.architectures.join(" and ")} <!-- x-release-please-version -->`],
     ["Native protocol", metadata.nativeHost.protocolVersion],
     [metadata.browsers.primary.name, `Acceptance baseline ${metadata.browsers.primary.minimumTestedVersion} or newer compatible Stable release`],
     [metadata.browsers.secondary.name, `Acceptance baseline ${metadata.browsers.secondary.minimumTestedVersion} or newer compatible Stable release`],
