@@ -208,13 +208,21 @@ impl ProcessRunner {
     }
 
     fn controlled_path(&self, policy: RunPolicy) -> OsString {
-        let mut entries = vec![self.paths.bin_dir.clone()];
         // yt-dlp's Brave-profile cookie decryption uses macOS's reviewed
         // `/usr/bin/security` Keychain client. No caller environment is restored.
         #[cfg(target_os = "macos")]
-        if policy.browser_profile {
-            entries.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
-        }
+        let entries = {
+            let mut entries = vec![self.paths.bin_dir.clone()];
+            if policy.browser_profile {
+                entries.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+            }
+            entries
+        };
+        #[cfg(not(target_os = "macos"))]
+        let entries = {
+            let _ = policy;
+            vec![self.paths.bin_dir.clone()]
+        };
         std::env::join_paths(entries).unwrap_or_else(|_| self.paths.bin_dir.as_os_str().to_owned())
     }
 }
