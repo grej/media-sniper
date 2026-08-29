@@ -7,5 +7,6 @@ artifacts/
 playwright-report/
 test-results/
 coverage/
+companion/target/
 *.log
 *.tsbuildinfo

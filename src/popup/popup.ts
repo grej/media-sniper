@@ -592,6 +592,12 @@ async function init(): Promise<void> {
   renderDownloads();
   await requestDetectedVideos();
   renderDetectedVideos();
+
+  if (__COMPANION_BUILD__) {
+    await import("./companion-popup").then(({ initializeCompanionPopup }) =>
+      initializeCompanionPopup(),
+    );
+  }
 }
 
 // Initialize when DOM is ready

@@ -1928,3 +1928,11 @@ async function handleSetIconGray(tabId?: number): Promise<void> {
 init().catch((error) => {
   logger.error("Service worker initialization failed:", error);
 });
+
+// Replaced with a literal before compilation; the standard build removes the
+// branch and never emits a companion chunk.
+if (__COMPANION_BUILD__) {
+  void import("./core/companion/service").then(({ registerCompanionService }) =>
+    registerCompanionService(),
+  );
+}
