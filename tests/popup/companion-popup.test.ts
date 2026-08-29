@@ -106,6 +106,39 @@ describe("companion popup", () => {
     expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
   });
 
+  it("keeps the first signed-in retry focused on the active Brave session", async () => {
+    const health = {
+      protocolVersion: 1, companionVersion: "1.0.0", browserTarget: "brave", platform: "macos",
+      healthy: true, issues: [], ytDlpVersion: "2026.08.19", ffmpegVersion: "8.0",
+      braveProfiles: [{ id: "Default", name: "Person 1" }],
+      capabilities: {
+        probe: true, download: true, sectionDownload: true, exactClip: true,
+        currentTabCookies: true, braveProfileCookies: true, revealOutput: true,
+      },
+    };
+    installChrome(async ({ type }) => {
+      if (type === "COMPANION_HEALTH") return { success: true, data: health };
+      if (type === "COMPANION_PROBE") {
+        return {
+          success: false,
+          error: { code: "AUTH_REQUIRED", message: "raw authentication diagnostic", recoverable: true },
+        };
+      }
+      return { success: true, data: { summaries: [] } };
+    });
+    const { initializeCompanionPopup } = await import("@/popup/companion-popup");
+    await initializeCompanionPopup();
+    const analyze = [...document.querySelectorAll("button")].find((item) => item.textContent?.includes("Analyze"));
+    analyze?.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("This video needs your YouTube session."));
+    expect(document.body.textContent).toContain("Retry using this Brave session");
+    expect(document.body.textContent).toContain("discarded afterward and never saved in history");
+    expect(document.body.textContent).not.toContain("raw authentication diagnostic");
+    expect(document.body.textContent).not.toContain("Advanced:");
+    expect(document.body.textContent).not.toContain("Person 1");
+    expect(document.querySelector("input[type='checkbox']")).toBeNull();
+  });
+
   it("redacts raw diagnostics saved by an older companion build", async () => {
     vi.doMock("@/core/database/downloads", () => ({
       getAllDownloads: vi.fn(async () => [{

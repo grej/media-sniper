@@ -237,7 +237,7 @@ function errorView(container: HTMLElement): void {
   const card = document.createElement("section");
   card.className = "companion-card companion-error";
   const title = ({
-    AUTH_REQUIRED: "Sign-in needed",
+    AUTH_REQUIRED: "This video needs your YouTube session.",
     AUTH_SCOPE_INSUFFICIENT: "Broader session access needed",
     FORMAT_UNAVAILABLE: "Download option changed",
     TOOLS_MISSING: "Media tools required",
@@ -245,14 +245,16 @@ function errorView(container: HTMLElement): void {
   } as Partial<Record<CompanionErrorCode, string>>)[error.code]
     ?? error.code.replace(/_/g, " ");
   card.append(text("companion-title", title));
-  card.append(text("companion-copy", error.message));
+  if (error.code !== "AUTH_REQUIRED") card.append(text("companion-copy", error.message));
   if (error.code === "COMPANION_NOT_INSTALLED") {
     card.append(button("Install companion", async () => { await chrome.tabs.create({ url: __COMPANION_INSTALL_URL__ }); }));
     card.append(button("Check again", checkHealth, true));
   } else if (error.code === "AUTH_REQUIRED") {
     card.append(button("Retry using this Brave session", () => analyze({ authMode: "current-tab" })));
-    card.append(text("companion-privacy", "Shares only cookies applicable to this active page for this operation. They are not saved in Media Sniper history."));
-    if (health?.capabilities.braveProfileCookies) renderProfileChoice(card);
+    card.append(text(
+      "companion-privacy",
+      "Media Sniper passes only this page's cookies to the local companion. They are discarded afterward and never saved in history.",
+    ));
   } else if (error.code === "AUTH_SCOPE_INSUFFICIENT" && health?.capabilities.braveProfileCookies) {
     renderProfileChoice(card);
   } else if (error.code === "TOOLS_MISSING" || error.code === "TOOLS_INCOMPATIBLE") {
