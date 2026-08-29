@@ -128,7 +128,7 @@ cd media-sniper
 npm install
 ```
 
-3. Build the extension:
+3. Build the standard extension:
 ```bash
 npm run build
 ```
@@ -147,8 +147,26 @@ npm run package:check
 ```
 
 The unpacked extension is written to `dist/`. The deterministic release archive
-and its SHA-256 file are written to `artifacts/`; `package:check` verifies the
-archive against that checksum.
+is written to `artifacts/` with a `standard` suffix. The separately compiled
+off-store companion extension is written to `dist-companion/` and packaged with
+a `companion` suffix. `package:check` verifies both checksums, manifest
+separation, stable companion identity, native-host origin, notices, and release
+metadata.
+
+### Companion edition for Brave
+
+The off-store companion edition adds page-level analysis and local native media
+processing through managed yt-dlp and FFmpeg tools. End users do not operate
+those tools from Terminal: analysis, quality selection, authenticated retry,
+download, clipping, progress, cancel, reveal, open, and tool updates are driven
+from Media Sniper.
+
+Brave Stable on macOS is the primary target and Chrome Stable is the secondary
+target. See the [graphical installation guide](docs/companion/install-macos.md),
+[privacy and security model](docs/companion/privacy-and-security.md), and
+[compatibility table](docs/companion/compatibility.md). The standard build
+retains the browser-native feature set and contains no companion code,
+permissions, or user interface.
 
 ## Usage
 
