@@ -27,6 +27,7 @@ import { VideoMetadata, VideoFormat } from "../../types";
 import { detectFormatFromUrl, normalizeUrl } from "../../utils/url-utils";
 import { extractThumbnail } from "../thumbnail-utils";
 import {
+  mediaSourceKey,
   redactSensitiveUrl,
   type NetworkMediaObservation,
 } from "../network-media";
@@ -141,10 +142,13 @@ export class DirectDetectionHandler {
     if (observation?.format !== VideoFormat.DIRECT && !this.isDirectVideoUrl(url)) return;
     if (this.isAudioOnlyUrl(url)) return;
 
-    if (observation) this.rememberNetworkCandidate(observation);
     const video = observation ? this.findVideoForObservation(observation) : this.findSoleVideo();
+    const effectiveObservation = observation && video
+      ? this.restoreEntryUrlFromVideo(observation, video)
+      : observation;
+    if (effectiveObservation) this.rememberNetworkCandidate(effectiveObservation);
     if (video) this.capturedUrls.set(video, url);
-    void this.detect(url, video, observation);
+    void this.detect(url, video, effectiveObservation);
   }
 
   /**
@@ -284,6 +288,27 @@ export class DirectDetectionHandler {
       video.src,
       ...[...video.querySelectorAll<HTMLSourceElement>("source")].map((source) => source.src),
     ].filter(Boolean);
+  }
+
+  private restoreEntryUrlFromVideo(
+    candidate: NetworkMediaObservation,
+    video: HTMLVideoElement,
+  ): NetworkMediaObservation {
+    if (
+      candidate.redirectChain.length !== 1 ||
+      normalizeUrl(candidate.entryUrl) !== normalizeUrl(candidate.url)
+    ) return candidate;
+    const aliases = new Set(candidate.redirectChain.map(normalizeUrl));
+    const entryUrl = this.videoSourceUrls(video).find((url) =>
+      this.isDirectVideoUrl(url) && !aliases.has(normalizeUrl(url)));
+    if (!entryUrl) return candidate;
+    const redirectChain = [entryUrl, ...candidate.redirectChain];
+    return {
+      ...candidate,
+      entryUrl,
+      redirectChain,
+      sourceKey: mediaSourceKey(redirectChain, candidate.format),
+    };
   }
 
   private candidateMatchesVideo(
