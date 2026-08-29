@@ -21,16 +21,17 @@ Python, Node, or a separately installed copy of yt-dlp or FFmpeg.
    extension reports **Companion ready**. A browser restart is requested only
    if Brave cannot refresh native-host registration while it is running.
 
-If the extension says **Tools required**, choose **Install tools**. The
-extension verifies the signed tool set, shows progress, runs a health check,
-and activates it. It retains the previous healthy tool set for rollback.
+If the extension says **Media tools required**, choose **Install tools**. Media
+Sniper opens the latest signed release. Run its graphical installer, return to
+Brave, and choose **Check again**. No Terminal steps are required.
 
 ## Update
 
-Media-tool updates appear inside Media Sniper as **Update tools**. The update is
-downloaded into a new versioned directory and becomes active only after its
-signature, hashes, and health check pass. If activation fails, Media Sniper
-keeps using the previous healthy release and offers **Try again**.
+Media-tool updates appear inside Media Sniper as **Update needed**. Choose
+**Get update**, run the latest signed graphical installer, return to Brave, and
+choose **Check again**. The installer activates a versioned tool set only after
+its signature, hashes, and health check pass, and retains the previous healthy
+tool set for rollback.
 
 For a native-host or extension update, open the newer signed disk image and run
 the installer again. Existing downloads and the previous healthy tool release

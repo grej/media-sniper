@@ -13,6 +13,7 @@ import type {
   CompanionOutputReceipt,
   YtDlpMediaSummary,
 } from "./types";
+import { companionFailureMessage } from "./failure-messages";
 
 export const CompanionUiMessage = {
   HEALTH: "COMPANION_HEALTH",
@@ -243,7 +244,12 @@ async function failJob(payload: { jobId?: string; code: CompanionErrorCode; mess
   const state = await getDownload(payload.jobId);
   if (!state) return;
   const cancelled = payload.code === "CANCELLED";
-  state.progress = { url: state.url, stage: cancelled ? DownloadStage.CANCELLED : DownloadStage.FAILED, error: cancelled ? undefined : payload.message, message: cancelled ? "Cancelled" : "Companion operation failed" };
+  state.progress = {
+    url: state.url,
+    stage: cancelled ? DownloadStage.CANCELLED : DownloadStage.FAILED,
+    error: cancelled ? undefined : companionFailureMessage(payload.code),
+    message: cancelled ? "Cancelled" : "Companion operation failed",
+  };
   if (state.operation?.companion) state.operation.companion.errorCode = payload.code;
   await storeDownload(state);
 }

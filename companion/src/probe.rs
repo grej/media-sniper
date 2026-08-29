@@ -4,8 +4,8 @@ use crate::protocol::{
 };
 use crate::runner::{ManagedTool, ProcessRunner, RunPolicy};
 use crate::security::{
-    bounded_text, create_private_dir, opaque_token, validate_public_page_url,
-    validate_resolved_public_page_url,
+    bounded_text, create_private_dir, diagnostic_requests_tool_update, opaque_token,
+    validate_public_page_url, validate_resolved_public_page_url,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -406,6 +406,12 @@ fn finite_nonnegative(value: Option<&Value>) -> Option<f64> {
 fn classify_probe_failure(auth: &AuthRequest, diagnostic: &str) -> HostError {
     let diagnostic = redact_auth_diagnostic(auth, diagnostic);
     let lower = diagnostic.to_ascii_lowercase();
+    if diagnostic_requests_tool_update(&diagnostic) {
+        return HostError::new(
+            ErrorCode::ToolsOutdated,
+            "Media Sniper's media tools need an update to keep up with this site",
+        );
+    }
     let auth_failure = ["sign in", "login", "authentication", "cookies"]
         .iter()
         .any(|needle| lower.contains(needle));
@@ -419,13 +425,9 @@ fn classify_probe_failure(auth: &AuthRequest, diagnostic: &str) -> HostError {
             "The scoped current-tab session was insufficient; advanced Brave profile access may be required",
         ),
         _ => HostError::new(
-                ErrorCode::UrlUnsupported,
-                if diagnostic.is_empty() {
-                    "yt-dlp could not analyze this page"
-                } else {
-                    &diagnostic
-                },
-            ),
+            ErrorCode::UrlUnsupported,
+            "The current media tools could not analyze this page",
+        ),
     }
 }
 
@@ -646,5 +648,19 @@ mod tests {
             .code,
             ErrorCode::UrlUnsupported
         );
+    }
+
+    #[test]
+    fn stale_tool_failures_are_sanitized_and_actionable() {
+        let diagnostic =
+            "WARNING: Your yt-dlp version is older than 90 days!\nERROR: HTTP Error 403: Forbidden";
+        let error = classify_probe_failure(&AuthRequest::Anonymous, diagnostic);
+        assert_eq!(error.code, ErrorCode::ToolsOutdated);
+        assert_eq!(error.code.as_str(), "TOOLS_INCOMPATIBLE");
+        assert_eq!(
+            error.safe_message(),
+            "Media Sniper's media tools need an update to keep up with this site"
+        );
+        assert!(!error.safe_message().contains("403"));
     }
 }

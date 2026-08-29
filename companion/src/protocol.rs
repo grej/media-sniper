@@ -51,6 +51,10 @@ pub enum ErrorCode {
     ProbeExpired,
     ToolsMissing,
     ToolsIncompatible,
+    /// Internal distinction used for recovery routing; serialized as the
+    /// stable public TOOLS_INCOMPATIBLE code.
+    #[serde(rename = "TOOLS_INCOMPATIBLE")]
+    ToolsOutdated,
     ToolsInstallUnavailable,
     SectionUnsupported,
     ExactClipUnsupported,
@@ -76,6 +80,7 @@ impl ErrorCode {
             Self::ProbeExpired => "FORMAT_UNAVAILABLE",
             Self::ToolsMissing => "TOOLS_MISSING",
             Self::ToolsIncompatible => "TOOLS_INCOMPATIBLE",
+            Self::ToolsOutdated => "TOOLS_INCOMPATIBLE",
             Self::ToolsInstallUnavailable => "TOOLS_MISSING",
             Self::SectionUnsupported => "SECTION_UNSUPPORTED",
             Self::ExactClipUnsupported => "EXACT_CLIP_UNSUPPORTED",

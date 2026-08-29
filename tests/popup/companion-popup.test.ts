@@ -73,4 +73,74 @@ describe("companion popup", () => {
     expect(document.body.textContent).toContain("Page via companion");
     expect(document.querySelector("input[placeholder*='argument']")).toBeNull();
   });
+
+  it("turns stale media tools into a friendly graphical update path", async () => {
+    installChrome(async ({ type }) => {
+      if (type === "COMPANION_HEALTH") {
+        return {
+          success: true,
+          data: {
+            protocolVersion: 1,
+            companionVersion: "1.0.0",
+            browserTarget: "brave",
+            platform: "macos",
+            healthy: false,
+            issues: [{
+              code: "TOOLS_INCOMPATIBLE",
+              message: "Media Sniper's media tools need an update to keep up with this site",
+              recoverable: true,
+            }],
+            capabilities: {
+              probe: false, download: false, sectionDownload: false, exactClip: false,
+              currentTabCookies: true, braveProfileCookies: true, revealOutput: true,
+            },
+          },
+        };
+      }
+      return { success: true, data: {} };
+    });
+    const { initializeCompanionPopup } = await import("@/popup/companion-popup");
+    await initializeCompanionPopup();
+    expect(document.body.textContent).toContain("Update needed");
+    expect(document.body.textContent).toContain("Get update");
+    expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
+  });
+
+  it("redacts raw diagnostics saved by an older companion build", async () => {
+    vi.doMock("@/core/database/downloads", () => ({
+      getAllDownloads: vi.fn(async () => [{
+        id: "legacy-failure",
+        url: "https://www.youtube.com/watch?v=fixture",
+        progress: {
+          stage: "failed",
+          message: "Companion operation failed",
+          error: "WARNING: Your yt-dlp version is older than 90 days. HTTP Error 403: Forbidden",
+        },
+        operation: {
+          backend: "yt-dlp",
+          companion: { title: "Fixture media", errorCode: "TOOLS_INCOMPATIBLE" },
+        },
+      }]),
+    }));
+    installChrome(async ({ type }) => {
+      if (type === "COMPANION_HEALTH") {
+        return {
+          success: true,
+          data: {
+            protocolVersion: 1, companionVersion: "1.0.0", browserTarget: "brave", platform: "macos",
+            healthy: true, issues: [], ytDlpVersion: "2026.08.19", ffmpegVersion: "8.0",
+            capabilities: {
+              probe: true, download: true, sectionDownload: true, exactClip: true,
+              currentTabCookies: true, braveProfileCookies: true, revealOutput: true,
+            },
+          },
+        };
+      }
+      return { success: true, data: { summaries: [] } };
+    });
+    const { initializeCompanionPopup } = await import("@/popup/companion-popup");
+    await initializeCompanionPopup();
+    expect(document.body.textContent).toContain("Media Sniper's media tools need an update");
+    expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
+  });
 });

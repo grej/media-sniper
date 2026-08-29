@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const RELEASE_PUBLIC_KEY_B64: &str = "QPWXTEbqWGBY7xqwO+TVA1809E28kK0HcDf0QpuWQtM=";
 
@@ -83,6 +84,18 @@ impl ToolManager {
             })
         });
         let mut issues = Vec::new();
+        if yt_dlp_version
+            .as_deref()
+            .is_some_and(yt_dlp_version_is_stale)
+        {
+            issues.push(HealthIssue {
+                code: ErrorCode::ToolsOutdated.as_str().to_owned(),
+                message:
+                    "Media Sniper's media tools need an update to keep up with supported sites"
+                        .to_owned(),
+                recoverable: true,
+            });
+        }
         if yt_dlp_version.is_none()
             || ffmpeg_version.is_none()
             || ffprobe_version.is_none()
@@ -468,6 +481,56 @@ fn js_runtime_supported(name: &str, version: &str) -> bool {
     }
 }
 
+fn yt_dlp_version_is_stale(version: &str) -> bool {
+    let today = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| (duration.as_secs() / 86_400) as i64);
+    today.is_some_and(|today| yt_dlp_version_is_stale_on(version, today))
+}
+
+fn yt_dlp_version_is_stale_on(version: &str, today: i64) -> bool {
+    yt_dlp_release_day(version).is_some_and(|released| today.saturating_sub(released) > 90)
+}
+
+fn yt_dlp_release_day(version: &str) -> Option<i64> {
+    let version = version.split_whitespace().next()?;
+    let mut parts = version.split('.');
+    let year = parts.next()?.parse::<i64>().ok()?;
+    let month = parts.next()?.parse::<u32>().ok()?;
+    let day = parts.next()?.parse::<u32>().ok()?;
+    if !(1970..=9999).contains(&year) || !(1..=12).contains(&month) {
+        return None;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    if day == 0 || day > month_days[(month - 1) as usize] {
+        return None;
+    }
+
+    // Howard Hinnant's civil-date conversion, yielding Unix epoch days.
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = adjusted_year.div_euclid(400);
+    let year_of_era = adjusted_year - era * 400;
+    let shifted_month = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
 pub fn discover_brave_profiles(user_home: &Path) -> Vec<BraveProfile> {
     let root = if cfg!(target_os = "macos") {
         user_home.join("Library/Application Support/BraveSoftware/Brave-Browser")
@@ -549,5 +612,13 @@ mod tests {
         assert!(!js_runtime_supported("deno", "deno 2.2.9"));
         assert!(js_runtime_supported("node", "v22.4.0"));
         assert!(!js_runtime_supported("node", "v20.9.0"));
+    }
+
+    #[test]
+    fn yt_dlp_versions_older_than_ninety_days_require_an_update() {
+        let today = yt_dlp_release_day("2026.08.29").unwrap();
+        assert!(yt_dlp_version_is_stale_on("2026.02.04", today));
+        assert!(!yt_dlp_version_is_stale_on("2026.08.19", today));
+        assert!(!yt_dlp_version_is_stale_on("unknown", today));
     }
 }

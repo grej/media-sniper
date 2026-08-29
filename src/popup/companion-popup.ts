@@ -6,6 +6,7 @@ import type {
   CompanionHealth,
   YtDlpMediaSummary,
 } from "../core/companion/types";
+import { companionFailureMessage } from "../core/companion/failure-messages";
 import { formatFileSize } from "./utils";
 
 const MSG = {
@@ -61,9 +62,10 @@ function text(className: string, value: string): HTMLElement {
 
 function setError(value: unknown): void {
   const candidate = value as Partial<ErrorView>;
+  const code = candidate.code ?? "INTERNAL_ERROR";
   error = {
-    code: candidate.code ?? "INTERNAL_ERROR",
-    message: candidate.message ?? "Media Sniper could not complete that action.",
+    code,
+    message: companionFailureMessage(code),
     recoverable: candidate.recoverable ?? true,
   };
 }
@@ -192,19 +194,35 @@ async function retryPersistedFast(job: DownloadState): Promise<void> {
 function healthView(container: HTMLElement): void {
   const card = document.createElement("section");
   card.className = "companion-card";
-  const title = text("companion-title", health ? "Media Sniper Companion" : "Companion required");
+  const missingTools = health?.issues.some((issue) => issue.code === "TOOLS_MISSING") ?? false;
+  const title = text(
+    "companion-title",
+    !health
+      ? "Companion required"
+      : health.healthy
+        ? "Media Sniper Companion"
+        : missingTools
+          ? "Media tools required"
+          : "Update needed",
+  );
   card.append(title);
   if (!health) {
     card.append(text("companion-copy", "Install the companion once to analyze and save page media without a terminal."));
     card.append(button("Install companion", async () => { await chrome.tabs.create({ url: __COMPANION_INSTALL_URL__ }); }));
     card.append(button("Check again", checkHealth, true));
   } else if (!health.healthy) {
-    card.append(text("companion-copy", health.issues.map((issue) => issue.message).join(" ") || "Managed tools need attention."));
-    const missing = health.issues.some((issue) => issue.code === "TOOLS_MISSING");
-    card.append(button(missing ? "Install tools" : "Update tools", async () => {
-      await send(missing ? MSG.installTools : MSG.updateTools);
+    card.append(text(
+      "companion-copy",
+      health.issues.map((issue) => companionFailureMessage(issue.code)).join(" ") || "Managed tools need attention.",
+    ));
+    card.append(button(missingTools ? "Install tools" : "Get update", async () => {
+      await send(missingTools ? MSG.installTools : MSG.updateTools);
       await chrome.tabs.create({ url: `${__COMPANION_INSTALL_URL__}#managed-tools` });
     }));
+    card.append(text(
+      "companion-privacy",
+      "Install the latest signed Media Sniper release, then return here and choose Check again.",
+    ));
     card.append(button("Check again", checkHealth, true));
   } else {
     const versions = [health.ytDlpVersion && `yt-dlp ${health.ytDlpVersion}`, health.ffmpegVersion && `FFmpeg ${health.ffmpegVersion}`].filter(Boolean).join(" · ");
@@ -218,7 +236,15 @@ function errorView(container: HTMLElement): void {
   if (!error) return;
   const card = document.createElement("section");
   card.className = "companion-card companion-error";
-  card.append(text("companion-title", error.code.replace(/_/g, " ")));
+  const title = ({
+    AUTH_REQUIRED: "Sign-in needed",
+    AUTH_SCOPE_INSUFFICIENT: "Broader session access needed",
+    FORMAT_UNAVAILABLE: "Download option changed",
+    TOOLS_MISSING: "Media tools required",
+    TOOLS_INCOMPATIBLE: "Update needed",
+  } as Partial<Record<CompanionErrorCode, string>>)[error.code]
+    ?? error.code.replace(/_/g, " ");
+  card.append(text("companion-title", title));
   card.append(text("companion-copy", error.message));
   if (error.code === "COMPANION_NOT_INSTALLED") {
     card.append(button("Install companion", async () => { await chrome.tabs.create({ url: __COMPANION_INSTALL_URL__ }); }));
@@ -230,10 +256,14 @@ function errorView(container: HTMLElement): void {
   } else if (error.code === "AUTH_SCOPE_INSUFFICIENT" && health?.capabilities.braveProfileCookies) {
     renderProfileChoice(card);
   } else if (error.code === "TOOLS_MISSING" || error.code === "TOOLS_INCOMPATIBLE") {
-    card.append(button(error.code === "TOOLS_MISSING" ? "Install tools" : "Update tools", async () => {
+    card.append(button(error.code === "TOOLS_MISSING" ? "Install tools" : "Get update", async () => {
       await send(error!.code === "TOOLS_MISSING" ? MSG.installTools : MSG.updateTools);
       await chrome.tabs.create({ url: `${__COMPANION_INSTALL_URL__}#managed-tools` });
     }));
+    card.append(text(
+      "companion-privacy",
+      "Install the latest signed Media Sniper release, then return here and choose Check again.",
+    ));
   } else if (error.code === "FORMAT_UNAVAILABLE") {
     card.append(button("Analyze again", () => analyze({ authMode: "anonymous" })));
   } else if (error.code === "EXACT_CLIP_UNSUPPORTED" && lastClip) {
@@ -342,7 +372,12 @@ function jobView(job: DownloadState): HTMLElement {
     card.append(button("Open output", async () => { await send(MSG.open, { id: job.id }); }, true));
     card.append(text("companion-privacy", "Cloud upload is unavailable for companion-written files in v1."));
   }
-  if (job.progress.error) card.append(text("companion-warning", job.progress.error));
+  if (job.progress.error) {
+    card.append(text(
+      "companion-warning",
+      companionFailureMessage(job.operation?.companion?.errorCode ?? "INTERNAL_ERROR"),
+    ));
+  }
   if (job.operation?.companion?.errorCode === "EXACT_CLIP_UNSUPPORTED") {
     card.append(button("Try Fast mode", () => retryPersistedFast(job), true));
   }

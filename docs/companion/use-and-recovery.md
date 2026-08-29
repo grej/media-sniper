@@ -29,8 +29,8 @@ never selected automatically.
 | --- | --- |
 | Companion required | Choose **Install companion**, complete the graphical installer, then **Check again**. |
 | Companion incompatible | Choose **Update companion**, install the signed update, then **Check again**. |
-| Tools missing | Choose **Install tools**. |
-| Tools incompatible | Choose **Update tools**; the prior healthy release remains available. |
+| Media tools required | Choose **Install tools**, run the latest signed graphical installer, then **Check again**. |
+| Update needed | Choose **Get update**, run the latest signed graphical installer, then **Check again**. The prior healthy tool set remains available for rollback. |
 | Authentication required | Choose **Retry using this Brave session** or continue anonymously. |
 | Format unavailable | Choose **Refresh analysis** and select a current option. |
 | Full-source clip fallback | Review the estimated transfer and choose **Download source, then create clip**, or cancel. |

@@ -284,6 +284,20 @@ pub fn redact_diagnostic(input: &str) -> String {
     bounded_text(Some(&result), "Operation failed", 1024)
 }
 
+/// Detect yt-dlp's stable update guidance without exposing its raw process
+/// output to the extension UI.
+pub fn diagnostic_requests_tool_update(input: &str) -> bool {
+    let lower = input.to_ascii_lowercase();
+    [
+        "older than 90 days",
+        "update your yt-dlp",
+        "update to a newer version",
+        "update to nightly or master",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
 fn redact_all_after_prefix(mut input: String, prefix: &str) -> String {
     let prefix_lower = prefix.to_ascii_lowercase();
     let mut search_start = 0;
@@ -387,5 +401,18 @@ mod tests {
             assert!(!diagnostic.contains(secret));
         }
         assert_eq!(diagnostic.matches("<redacted>").count(), 4);
+    }
+
+    #[test]
+    fn recognizes_tool_update_guidance_without_matching_generic_failures() {
+        assert!(diagnostic_requests_tool_update(
+            "WARNING: Your yt-dlp version is older than 90 days!"
+        ));
+        assert!(diagnostic_requests_tool_update(
+            "Please update your yt-dlp to the latest version"
+        ));
+        assert!(!diagnostic_requests_tool_update(
+            "ERROR: unable to download video data: HTTP Error 403"
+        ));
     }
 }

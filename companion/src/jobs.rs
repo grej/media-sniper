@@ -6,8 +6,8 @@ use crate::protocol::{
 };
 use crate::runner::{ManagedTool, ProcessOutput, ProcessRunner, RunPolicy};
 use crate::security::{
-    create_private_dir, opaque_token, redact_diagnostic, safe_filename_component,
-    validate_public_page_url, validate_resolved_public_page_url,
+    create_private_dir, diagnostic_requests_tool_update, opaque_token, redact_diagnostic,
+    safe_filename_component, validate_public_page_url, validate_resolved_public_page_url,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -878,8 +878,18 @@ fn json_u64(value: &Value, key: &str) -> Option<u64> {
 }
 
 fn classify_download_failure(output: &ProcessOutput, auth: &AuthRequest) -> HostError {
-    let diagnostic = redact_auth_diagnostic(auth, &output.stderr);
+    classify_download_diagnostic(&output.stderr, auth)
+}
+
+fn classify_download_diagnostic(raw_diagnostic: &str, auth: &AuthRequest) -> HostError {
+    let diagnostic = redact_auth_diagnostic(auth, raw_diagnostic);
     let lower = diagnostic.to_ascii_lowercase();
+    if diagnostic_requests_tool_update(&diagnostic) {
+        return HostError::new(
+            ErrorCode::ToolsOutdated,
+            "Media Sniper's media tools need an update to keep up with this site",
+        );
+    }
     let auth_failure = ["sign in", "login", "authentication", "cookies"]
         .iter()
         .any(|needle| lower.contains(needle));
@@ -894,14 +904,15 @@ fn classify_download_failure(output: &ProcessOutput, auth: &AuthRequest) -> Host
     } else {
         ErrorCode::FormatUnavailable
     };
-    HostError::new(
-        code,
-        if diagnostic.is_empty() {
-            "yt-dlp could not complete the media operation"
-        } else {
-            &diagnostic
-        },
-    )
+    let message = match code {
+        ErrorCode::AuthRequired => "This media requires an authenticated browser session",
+        ErrorCode::AuthScopeInsufficient => {
+            "The scoped browser session was insufficient for this media"
+        }
+        ErrorCode::DiskFull => "There is not enough free space to save this media",
+        _ => "The selected media format is no longer available; analyze the page again",
+    };
+    HostError::new(code, message)
 }
 
 fn validate_job_output(job_dir: &Path, path: &Path) -> Result<PathBuf, HostError> {
@@ -1372,6 +1383,21 @@ mod tests {
                 .unwrap();
         assert_eq!(progress.downloaded_bytes, Some(100));
         assert_eq!(progress.percentage, None);
+    }
+
+    #[test]
+    fn stale_download_failures_request_an_update_without_raw_diagnostics() {
+        let error = classify_download_diagnostic(
+            "WARNING: Your yt-dlp version is older than 90 days!\nERROR: HTTP Error 403: Forbidden",
+            &AuthRequest::Anonymous,
+        );
+        assert_eq!(error.code, ErrorCode::ToolsOutdated);
+        assert_eq!(error.code.as_str(), "TOOLS_INCOMPATIBLE");
+        assert_eq!(
+            error.safe_message(),
+            "Media Sniper's media tools need an update to keep up with this site"
+        );
+        assert!(!error.safe_message().contains("403"));
     }
 
     #[test]
