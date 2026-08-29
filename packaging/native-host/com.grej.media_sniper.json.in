@@ -1,0 +1,9 @@
+{
+  "name": "com.grej.media_sniper",
+  "description": "Media Sniper native media companion",
+  "path": "__NATIVE_HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://dioapemglpdpmfmoekckbpenmpdgkofp/"
+  ]
+}

@@ -4,7 +4,10 @@
   "type": "module",
   "description": "Browser extension for detecting, downloading, recording, and clipping HLS, DASH, and direct video",
   "scripts": {
-    "build": "vite build",
+    "build": "npm run build:standard",
+    "build:standard": "vite build --mode standard",
+    "build:companion": "vite build --mode companion",
+    "build:variants": "npm run build:standard && npm run build:companion",
     "dev": "vite build --watch",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
@@ -12,8 +15,15 @@
     "test:e2e": "npm run build && playwright test",
     "test:e2e:serve": "vite --host 127.0.0.1 --port 4175 --strictPort",
     "test:media": "vitest run tests/media",
-    "package": "npm run type-check && npm test -- --run && npm run build && node scripts/package.mjs",
-    "package:check": "node scripts/package.mjs --check"
+    "package": "npm run type-check && npm test -- --run && npm run package:extensions",
+    "package:extensions": "npm run build:variants && npm run package:standard && npm run package:companion",
+    "package:standard": "node scripts/package.mjs --variant standard",
+    "package:companion": "node scripts/package.mjs --variant companion",
+    "package:check": "npm run package:check:standard && npm run package:check:companion && npm run release:check",
+    "package:check:standard": "node scripts/package.mjs --check --variant standard",
+    "package:check:companion": "node scripts/package.mjs --check --variant companion",
+    "release:check": "node scripts/check-companion-release.mjs",
+    "compatibility:generate": "node scripts/generate-compatibility.mjs"
   },
   "keywords": [
     "browser-extension",

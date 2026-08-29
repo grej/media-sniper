@@ -17,6 +17,21 @@
           "type": "json",
           "path": "manifest.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packaging/compatibility.json",
+          "jsonpath": "$.extension.standardVersion"
+        },
+        {
+          "type": "json",
+          "path": "packaging/compatibility.json",
+          "jsonpath": "$.extension.companionVersion"
+        },
+        {
+          "type": "json",
+          "path": "packaging/compatibility.json",
+          "jsonpath": "$.nativeHost.companionVersion"
         }
       ]
     }

@@ -2,6 +2,7 @@
 
 node_modules/
 dist/
+dist-companion/
 artifacts/
 playwright-report/
 test-results/

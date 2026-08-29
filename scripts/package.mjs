@@ -14,14 +14,40 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  COMPANION_EXTENSION_ID,
+  COMPANION_MANIFEST_KEY,
+  extensionIdFromManifestKey,
+} from "../build/extension-variants.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const distDirectory = join(projectRoot, "dist");
 const artifactsDirectory = join(projectRoot, "artifacts");
 const packageMetadata = JSON.parse(
   await readFile(join(projectRoot, "package.json"), "utf8"),
 );
-const archiveBasename = `${packageMetadata.name}-v${packageMetadata.version}.zip`;
+const argumentsList = process.argv.slice(2);
+let checkOnly = false;
+let variant = "standard";
+for (let index = 0; index < argumentsList.length; index += 1) {
+  const argument = argumentsList[index];
+  if (argument === "--check") {
+    checkOnly = true;
+  } else if (argument === "--variant") {
+    variant = argumentsList[index + 1];
+    index += 1;
+  } else {
+    throw new Error(
+      "Usage: node scripts/package.mjs [--check] [--variant standard|companion]",
+    );
+  }
+}
+if (variant !== "standard" && variant !== "companion") {
+  throw new Error(`Unsupported package variant: ${variant}`);
+}
+
+const distDirectory = join(projectRoot, variant === "standard" ? "dist" : "dist-companion");
+const archiveBasename =
+  `${packageMetadata.name}-${variant}-v${packageMetadata.version}.zip`;
 const archivePath = join(artifactsDirectory, archiveBasename);
 const checksumPath = `${archivePath}.sha256`;
 const FIXED_DOS_TIME = 0;
@@ -160,7 +186,7 @@ async function sha256(path) {
 }
 
 function listStoredZipEntries(bytes) {
-  const names = [];
+  const entries = [];
   let offset = 0;
   while (offset + 4 <= bytes.length && bytes.readUInt32LE(offset) === 0x04034b50) {
     if (offset + 30 > bytes.length) throw new Error("Truncated ZIP local header");
@@ -173,13 +199,17 @@ function listStoredZipEntries(bytes) {
     const dataStart = nameStart + filenameLength + extraLength;
     const nextOffset = dataStart + size;
     if (nextOffset > bytes.length) throw new Error("Truncated ZIP entry");
-    names.push(bytes.subarray(nameStart, nameStart + filenameLength).toString("utf8"));
+    entries.push({
+      name: bytes.subarray(nameStart, nameStart + filenameLength).toString("utf8"),
+      contents: bytes.subarray(dataStart, nextOffset),
+    });
     offset = nextOffset;
   }
-  return names;
+  return entries;
 }
 
-function validateArchiveEntries(names) {
+function validateArchiveEntries(entries) {
+  const names = entries.map((entry) => entry.name);
   const required = [
     "manifest.json",
     "background.js",
@@ -203,12 +233,38 @@ function validateArchiveEntries(names) {
     name.startsWith("tests/") || name.startsWith("src/") || name.startsWith("node_modules/")
   );
   if (forbidden) throw new Error(`Release ZIP contains forbidden source artifact: ${forbidden}`);
+  if (variant === "companion" && !names.includes("COMPATIBILITY.json")) {
+    throw new Error("Companion release ZIP is missing COMPATIBILITY.json");
+  }
+
+  validateArtifactContents(entries, "release ZIP");
+}
+
+const STANDARD_FORBIDDEN_TOKENS = ["nativeMessaging", "cookies", "companion"];
+
+function validateArtifactContents(entries, label) {
+  if (variant !== "standard") return;
+  for (const entry of entries) {
+    // Scan every executable bundle and textual resource. Browser FFmpeg's
+    // reviewed WASM includes an unrelated libcurl "cookies" diagnostic, so
+    // opaque binary payloads are covered by their pinned dependency hash
+    // rather than treated as extension-feature evidence.
+    if (/\.(?:wasm|png|woff2)$/i.test(entry.name)) continue;
+    for (const token of STANDARD_FORBIDDEN_TOKENS) {
+      if (entry.contents.includes(Buffer.from(token, "utf8"))) {
+        throw new Error(
+          `Standard ${label} contains forbidden token ${JSON.stringify(token)} in ${entry.name}`,
+        );
+      }
+    }
+  }
 }
 
 async function validateBuild() {
   const manifestPath = join(distDirectory, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  if (manifest.name !== "Media Sniper") {
+  const expectedName = variant === "standard" ? "Media Sniper" : "Media Sniper Companion";
+  if (manifest.name !== expectedName) {
     throw new Error(`Built manifest has unexpected name: ${manifest.name}`);
   }
   if (manifest.version !== packageMetadata.version) {
@@ -216,15 +272,48 @@ async function validateBuild() {
       `Version mismatch: package ${packageMetadata.version}, manifest ${manifest.version}`,
     );
   }
+  const permissionSet = new Set(manifest.permissions ?? []);
+  const optionalPermissionSet = new Set(manifest.optional_permissions ?? []);
+  if (variant === "standard") {
+    if (manifest.key) throw new Error("Standard manifest must not contain a stable companion key");
+    if (permissionSet.has("nativeMessaging") || optionalPermissionSet.has("cookies")) {
+      throw new Error("Standard manifest contains a companion-only permission");
+    }
+  } else {
+    if (manifest.key !== COMPANION_MANIFEST_KEY) {
+      throw new Error("Companion manifest does not contain the reviewed public key");
+    }
+    if (extensionIdFromManifestKey(manifest.key) !== COMPANION_EXTENSION_ID) {
+      throw new Error("Companion manifest key derives an unexpected extension ID");
+    }
+    if (!permissionSet.has("nativeMessaging") || !optionalPermissionSet.has("cookies")) {
+      throw new Error("Companion manifest is missing nativeMessaging or optional cookies");
+    }
+  }
 }
 
 async function createPackage() {
   await validateBuild();
   const files = await collectFiles(distDirectory);
-  for (const notice of ["LICENSE", "THIRD_PARTY_NOTICES.md"]) {
+  const notices = [
+    { source: "LICENSE", archivePath: "LICENSE" },
+    {
+      source: variant === "standard"
+        ? "THIRD_PARTY_NOTICES.md"
+        : "packaging/companion/THIRD_PARTY_NOTICES.md",
+      archivePath: "THIRD_PARTY_NOTICES.md",
+    },
+  ];
+  if (variant === "companion") {
+    notices.push({
+      source: "packaging/compatibility.json",
+      archivePath: "COMPATIBILITY.json",
+    });
+  }
+  for (const notice of notices) {
     files.push({
-      absolutePath: join(projectRoot, notice),
-      archivePath: notice,
+      absolutePath: join(projectRoot, notice.source),
+      archivePath: notice.archivePath,
     });
   }
   files.sort((left, right) => compareNames(left.archivePath, right.archivePath));
@@ -244,6 +333,14 @@ async function createPackage() {
     const metadata = await stat(file.absolutePath);
     if (!metadata.isFile()) throw new Error(`Package input is not a file: ${file.absolutePath}`);
   }
+
+  validateArtifactContents(
+    await Promise.all(files.map(async (file) => ({
+      name: file.archivePath,
+      contents: await readFile(file.absolutePath),
+    }))),
+    "build",
+  );
 
   await mkdir(artifactsDirectory, { recursive: true });
   const temporaryPath = `${archivePath}.tmp`;
@@ -307,14 +404,9 @@ async function checkPackage() {
   }
   const entries = listStoredZipEntries(await readFile(archivePath));
   validateArchiveEntries(entries);
-  console.log(`Verified ${archiveBasename} (${entries.length} entries)`);
+  console.log(`Verified ${archiveBasename} (${entries.length} entries, ${variant} variant)`);
   console.log(`SHA-256: ${actual}`);
 }
 
-const checkOnly = process.argv.slice(2);
-if (checkOnly.length > 1 || (checkOnly.length === 1 && checkOnly[0] !== "--check")) {
-  throw new Error("Usage: node scripts/package.mjs [--check]");
-}
-
-if (checkOnly[0] === "--check") await checkPackage();
+if (checkOnly) await checkPackage();
 else await createPackage();
