@@ -70,7 +70,7 @@ describe("companion popup", () => {
     await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>("#companion-quality")?.options.length).toBe(2));
     const options = [...document.querySelectorAll<HTMLOptionElement>("#companion-quality option")];
     expect(options.map((item) => item.value)).toEqual(["best", "audio-only"]);
-    expect(document.body.textContent).toContain("Page via companion");
+    expect(document.body.textContent).toContain("Current page via companion");
     expect(document.querySelector("input[placeholder*='argument']")).toBeNull();
   });
 
@@ -175,5 +175,54 @@ describe("companion popup", () => {
     await initializeCompanionPopup();
     expect(document.body.textContent).toContain("Media Sniper's media tools need an update");
     expect(document.body.textContent).not.toMatch(/older than 90 days|HTTP Error|403|pip|terminal/i);
+  });
+
+  it("features a saved clip for the current page and collapses prior activity", async () => {
+    const currentSummary = {
+      extractorKey: "Youtube", mediaId: "current", webpageUrl: "https://www.youtube.com/watch?v=current",
+      title: "Current video", durationMs: 60_000, isLive: false, isDrm: false, probeToken: "current-token",
+      probedAt: Date.now(), selections: [{ kind: "preset", key: "best", label: "Best" }],
+    };
+    vi.doMock("@/core/database/downloads", () => ({
+      getAllDownloads: vi.fn(async () => [{
+        id: "current-clip", url: currentSummary.webpageUrl, createdAt: 2, updatedAt: 2,
+        metadata: {}, progress: { stage: "completed", percentage: 100 },
+        operation: {
+          backend: "yt-dlp", kind: "clip", operationKey: "current-key",
+          companion: { extractorKey: "Youtube", mediaId: "current", title: "Current video" },
+        },
+      }, {
+        id: "old-download", url: "https://www.youtube.com/watch?v=old", createdAt: 1, updatedAt: 1,
+        metadata: {}, progress: { stage: "completed", percentage: 100 },
+        operation: {
+          backend: "yt-dlp", kind: "download", operationKey: "old-key",
+          companion: { extractorKey: "Youtube", mediaId: "old", title: "Old video" },
+        },
+      }]),
+    }));
+    installChrome(async ({ type }) => {
+      if (type === "COMPANION_GET_STATE") return { success: true, data: { summaries: [currentSummary] } };
+      if (type === "COMPANION_HEALTH") return {
+        success: true,
+        data: {
+          protocolVersion: 1, companionVersion: "1.0.0", browserTarget: "brave", platform: "macos",
+          healthy: true, issues: [], ytDlpVersion: "2026.08.19", ffmpegVersion: "8.0",
+          capabilities: {
+            probe: true, download: true, sectionDownload: true, exactClip: true,
+            currentTabCookies: true, braveProfileCookies: true, revealOutput: true,
+          },
+        },
+      };
+      return { success: true, data: {} };
+    });
+
+    const { initializeCompanionPopup } = await import("@/popup/companion-popup");
+    await initializeCompanionPopup();
+
+    expect(document.body.textContent).toContain("Clip saved");
+    expect(document.body.textContent).toContain("Saved to Downloads/Media Sniper");
+    const history = document.querySelector<HTMLDetailsElement>("details.companion-history");
+    expect(history?.open).toBe(false);
+    expect(history?.querySelector("summary")?.textContent).toBe("Previous companion activity (1)");
   });
 });

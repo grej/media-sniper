@@ -49,6 +49,7 @@ function button(label: string, action: () => void | Promise<void>, secondary = f
   element.type = "button";
   element.className = secondary ? "secondary-btn companion-btn" : "primary-btn companion-btn";
   element.textContent = label;
+  element.disabled = busy;
   element.addEventListener("click", () => void action());
   return element;
 }
@@ -300,7 +301,7 @@ function renderProfileChoice(container: HTMLElement): void {
 function summaryView(container: HTMLElement): void {
   if (!summary) return;
   const card = document.createElement("section"); card.className = "companion-card";
-  card.append(text("companion-kicker", "Page via companion"));
+  card.append(text("companion-kicker", "Current page via companion"));
   card.append(text("companion-title", summary.title));
   const details = [summary.uploader, summary.durationMs ? `${Math.round(summary.durationMs / 1000)} sec` : undefined, summary.extractorKey].filter(Boolean).join(" · ");
   card.append(text("companion-copy", details));
@@ -353,19 +354,63 @@ function fallbackView(container: HTMLElement): void {
 }
 
 async function jobsView(container: HTMLElement): Promise<void> {
-  const jobs = (await getAllDownloads()).filter((item) => item.operation?.backend === "yt-dlp").slice(0, 5);
+  const jobs = (await getAllDownloads())
+    .filter((item) => item.operation?.backend === "yt-dlp")
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 10);
   if (!jobs.length) return;
-  const section = document.createElement("section"); section.className = "companion-jobs";
-  section.append(text("companion-kicker", "Companion activity"));
-  for (const job of jobs) section.append(jobView(job));
-  container.append(section);
+  const terminal = new Set([DownloadStage.COMPLETED, DownloadStage.FAILED, DownloadStage.CANCELLED]);
+  const active = jobs.filter((job) => !terminal.has(job.progress.stage) || Boolean(job.operation?.companion?.fallbackReason));
+  const current = summary
+    ? jobs.filter((job) =>
+        job.operation?.companion?.mediaId === summary!.mediaId &&
+        job.operation.companion.extractorKey === summary!.extractorKey)
+    : [];
+  const currentIds = new Set(current.map((job) => job.id));
+  const featured = active.filter((job) => currentIds.has(job.id));
+  if (current[0] && !featured.some((job) => job.id === current[0].id)) featured.push(current[0]);
+
+  if (featured.length) {
+    const section = document.createElement("section"); section.className = "companion-jobs";
+    section.append(text("companion-kicker", "Current companion activity"));
+    for (const job of featured) section.append(jobView(job, job.id === current[0]?.id));
+    container.append(section);
+  }
+
+  const otherActive = active.filter((job) => !currentIds.has(job.id));
+  if (otherActive.length) {
+    const section = document.createElement("section"); section.className = "companion-jobs";
+    section.append(text("companion-kicker", "Other active companion jobs"));
+    for (const job of otherActive) section.append(jobView(job));
+    container.append(section);
+  }
+
+  const featuredIds = new Set([...featured, ...otherActive].map((job) => job.id));
+  const previous = jobs.filter((job) => !featuredIds.has(job.id));
+  if (previous.length) {
+    const history = document.createElement("details"); history.className = "companion-history";
+    const heading = document.createElement("summary");
+    heading.textContent = `Previous companion activity (${previous.length})`;
+    history.append(heading);
+    for (const job of previous) history.append(jobView(job));
+    container.append(history);
+  }
 }
 
-function jobView(job: DownloadState): HTMLElement {
+function jobView(job: DownloadState, currentPage = false): HTMLElement {
   const card = document.createElement("div"); card.className = "companion-card companion-job";
-  card.append(text("companion-title", job.operation?.companion?.title ?? "Companion media"));
+  const mediaTitle = job.operation?.companion?.title ?? "Companion media";
+  if (currentPage && job.progress.stage === DownloadStage.COMPLETED) {
+    card.append(text("companion-title", job.operation?.kind === "clip" ? "Clip saved" : "Download saved"));
+    card.append(text("companion-copy", mediaTitle));
+  } else {
+    card.append(text("companion-title", mediaTitle));
+  }
   const percentage = job.progress.percentage === undefined ? "" : ` · ${Math.round(job.progress.percentage)}%`;
-  card.append(text("companion-copy", `${job.progress.message ?? job.progress.stage}${percentage}`));
+  const progressMessage = job.progress.stage === DownloadStage.COMPLETED
+    ? "Saved to Downloads/Media Sniper"
+    : job.progress.message ?? job.progress.stage;
+  card.append(text("companion-copy", `${progressMessage}${percentage}`));
   const waitingFallback = Boolean(job.operation?.companion?.fallbackReason);
   const active = !waitingFallback && ![DownloadStage.COMPLETED, DownloadStage.FAILED, DownloadStage.CANCELLED].includes(job.progress.stage);
   if (active) card.append(button("Cancel", async () => { await send(MSG.cancel, { jobId: job.id }); }, true));
@@ -409,10 +454,11 @@ function installStyles(): void {
     .companion-title{font-weight:600;color:var(--text-primary);margin-bottom:4px;overflow-wrap:anywhere}
     .companion-copy,.companion-privacy,.companion-warning{color:var(--text-secondary);font-size:11px;line-height:1.4;margin:5px 0}
     .companion-privacy{color:var(--text-tertiary)}.companion-warning{color:var(--warning)}.companion-error{border-color:var(--error)}
-    .companion-btn{font-size:11px;padding:5px 9px;margin:5px 5px 0 0}
+    .companion-btn{font-size:11px;padding:5px 9px;margin:5px 5px 0 0}.companion-btn:disabled{opacity:.55;cursor:wait}
     .companion-select,.companion-fields input,.companion-fields select{width:100%;box-sizing:border-box;margin:5px 0;padding:6px;border:1px solid var(--border-hover);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text-primary)}
     .companion-consent{display:block;font-size:11px;color:var(--text-secondary);margin:7px 0}.companion-clip{margin-top:8px}.companion-clip summary{cursor:pointer;color:var(--accent)}
     .companion-loading{font-size:11px;color:var(--text-secondary);margin-bottom:6px}.companion-job{padding:8px}.companion-warning-card{border-color:var(--warning)}
+    .companion-history>summary{cursor:pointer;color:var(--text-secondary);font-size:11px;margin:8px 0}.companion-history[open]>summary{margin-bottom:8px}
   `;
   document.head.append(style);
 }
@@ -426,9 +472,10 @@ export async function initializeCompanionPopup(): Promise<void> {
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type !== MSG.changed) return;
     if (message.payload?.activeTabChanged === true) {
+      error = null; fallback = null; lastClip = null; authChoice = { authMode: "anonymous" };
       void send<{ summaries: YtDlpMediaSummary[] }>(MSG.state)
-        .then((state) => { summary = state.summaries[0] ?? null; fallback = null; })
-        .catch(() => { summary = null; fallback = null; })
+        .then((state) => { summary = state.summaries[0] ?? null; })
+        .catch(() => { summary = null; })
         .finally(() => void render());
       return;
     }

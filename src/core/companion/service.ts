@@ -1,5 +1,5 @@
 import { createOperationKey } from "../clipping/operation-key";
-import { getDownload, storeDownload } from "../database/downloads";
+import { getActiveDownloads, getDownload, storeDownload } from "../database/downloads";
 import { DownloadStage, type DownloadState, type VideoMetadata } from "../types";
 import { CompanionClient, CompanionClientError } from "./client";
 import type { CompanionEvent } from "./protocol";
@@ -43,6 +43,7 @@ const client = new CompanionClient();
 const summaries = new Map<string, YtDlpMediaSummary>();
 export interface AnalyzedPageBinding { tabId: number; requestedPageUrl: string }
 const analyzedPages = new Map<string, AnalyzedPageBinding>();
+const activeCompanionJobs = new Map<string, string>();
 let health: CompanionHealth | null = null;
 let registered = false;
 
@@ -176,6 +177,52 @@ function selectedOption(summary: YtDlpMediaSummary, selectionKey: string) {
   return selected;
 }
 
+export function companionOperationKey(
+  summary: YtDlpMediaSummary,
+  selectionKey: string,
+  kind: "download" | "clip",
+  clip?: { startMs: number; endMs: number; mode: "fast" | "exact" },
+): string {
+  const selected = selectedOption(summary, selectionKey);
+  return createOperationKey({
+    backend: "yt-dlp", kind, url: summary.webpageUrl, quality: selectionKey,
+    clip: clip ? { ...clip, markSource: "manual" } : undefined,
+    outputContainer: selected.expectedContainer ?? "native",
+  });
+}
+
+async function reserveCompanionJob(operationKey: string): Promise<{ jobId: string; duplicate: boolean }> {
+  const reserved = activeCompanionJobs.get(operationKey);
+  if (reserved) return { jobId: reserved, duplicate: true };
+
+  const durable = (await getActiveDownloads()).find((job) =>
+    job.operation?.backend === "yt-dlp" && job.operation.operationKey === operationKey);
+  if (durable) {
+    activeCompanionJobs.set(operationKey, durable.id);
+    return { jobId: durable.id, duplicate: true };
+  }
+
+  // Recheck after the database await so two same-turn requests cannot both win.
+  const concurrent = activeCompanionJobs.get(operationKey);
+  if (concurrent) return { jobId: concurrent, duplicate: true };
+  const jobId = crypto.randomUUID();
+  activeCompanionJobs.set(operationKey, jobId);
+  return { jobId, duplicate: false };
+}
+
+function releaseCompanionJob(state: DownloadState | null | undefined): void {
+  const operationKey = state?.operation?.operationKey;
+  if (operationKey && activeCompanionJobs.get(operationKey) === state?.id) {
+    activeCompanionJobs.delete(operationKey);
+  }
+}
+
+function releaseCompanionJobById(jobId: string): void {
+  for (const [operationKey, activeJobId] of activeCompanionJobs) {
+    if (activeJobId === jobId) activeCompanionJobs.delete(operationKey);
+  }
+}
+
 export async function createCompanionJobState(
   jobId: string, summary: YtDlpMediaSummary, selectionKey: string,
   kind: "download" | "clip", clip?: { startMs: number; endMs: number; mode: "fast" | "exact" },
@@ -192,11 +239,7 @@ export async function createCompanionJobState(
     progress: { url: summary.webpageUrl, stage: DownloadStage.PLANNING, message: "Queued by companion" },
     operation: {
       kind, backend: "yt-dlp",
-      operationKey: createOperationKey({
-        backend: "yt-dlp", kind, url: summary.webpageUrl, quality: selectionKey,
-        clip: clip ? { ...clip, markSource: "manual" } : undefined,
-        outputContainer: selected.expectedContainer ?? "native",
-      }),
+      operationKey: companionOperationKey(summary, selectionKey, kind, clip),
       clip: clip ? { ...clip, markSource: "manual" } : undefined,
       requestedDurationMs: clip ? clip.endMs - clip.startMs : undefined,
       qualityKey: selectionKey,
@@ -237,12 +280,16 @@ async function completeJob(receipt: CompanionOutputReceipt): Promise<void> {
   state.operation.companion.finalPath = receipt.finalPath;
   state.operation.companion.outputToken = receipt.outputToken;
   await storeDownload(state);
+  releaseCompanionJob(state);
 }
 
 async function failJob(payload: { jobId?: string; code: CompanionErrorCode; message: string }): Promise<void> {
   if (!payload.jobId) return;
   const state = await getDownload(payload.jobId);
-  if (!state) return;
+  if (!state) {
+    releaseCompanionJobById(payload.jobId);
+    return;
+  }
   const cancelled = payload.code === "CANCELLED";
   state.progress = {
     url: state.url,
@@ -252,6 +299,7 @@ async function failJob(payload: { jobId?: string; code: CompanionErrorCode; mess
   };
   if (state.operation?.companion) state.operation.companion.errorCode = payload.code;
   await storeDownload(state);
+  releaseCompanionJob(state);
 }
 
 async function onCompanionEvent(event: CompanionEvent): Promise<void> {
@@ -309,6 +357,7 @@ async function stateForActiveTab(): Promise<{ health: CompanionHealth | null; su
 async function probe(choice: AuthChoice): Promise<YtDlpMediaSummary> {
   const tab = await activeHttpTab();
   const requestedPageUrl = analyzedPageIdentity(tab.url!);
+  const binding = { tabId: tab.id!, requestedPageUrl };
   let auth = await authBundle(choice, tab);
   try {
     const event = await client.request("probe", { pageUrl: tab.url!, auth }, 90_000);
@@ -318,11 +367,14 @@ async function probe(choice: AuthChoice): Promise<YtDlpMediaSummary> {
     // youtu.be to www.youtube.com). This URL is execution/output identity only;
     // starts remain bound to the exact requested tab and page below.
     validateCanonicalPageUrl(summary.webpageUrl);
+    // YouTube navigation does not necessarily reload the tab. Do not let a
+    // slow result for the previous watch URL replace the active page.
+    validateAnalyzedPageBinding(await activeHttpTab(), binding);
     // Replace only this tab's prior analysis. A probe in another tab must not
     // invalidate a still-current page binding.
     clearAnalysesForTab(tab.id!);
     summaries.set(summary.probeToken, summary);
-    analyzedPages.set(summary.probeToken, { tabId: tab.id!, requestedPageUrl });
+    analyzedPages.set(summary.probeToken, binding);
     return summary;
   } finally { auth = { mode: "anonymous" }; }
 }
@@ -335,10 +387,13 @@ async function startDownload(payload: StartPayload): Promise<{ jobId: string }> 
   const binding = analyzedPages.get(payload.probeToken);
   if (!binding) throw companionError("FORMAT_UNAVAILABLE", "This analysis expired. Analyze the page again.");
   validateAnalyzedPageBinding(tab, binding);
-  const jobId = crypto.randomUUID();
-  await createCompanionJobState(jobId, summary, payload.selectionKey, "download");
-  let auth = await authBundle(payload, tab);
+  const operationKey = companionOperationKey(summary, payload.selectionKey, "download");
+  const { jobId, duplicate } = await reserveCompanionJob(operationKey);
+  if (duplicate) return { jobId };
+  let auth: CompanionAuthBundle = { mode: "anonymous" };
   try {
+    await createCompanionJobState(jobId, summary, payload.selectionKey, "download");
+    auth = await authBundle(payload, tab);
     await client.request("start_download", { jobId, probeToken: payload.probeToken, selectionKey: payload.selectionKey, auth });
     return { jobId };
   } catch (error) { await failJob({ jobId, ...safeError(error) }); throw error; }
@@ -358,8 +413,8 @@ async function startClip(payload: StartClipPayload): Promise<{ jobId: string }> 
   const binding = analyzedPages.get(payload.probeToken);
   if (!binding) throw companionError("FORMAT_UNAVAILABLE", "This analysis expired. Analyze the page again.");
   validateAnalyzedPageBinding(tab, binding);
-  const jobId = payload.resumeJobId ?? crypto.randomUUID();
   const clip = { startMs: payload.startMs, endMs: payload.endMs, mode: payload.mode };
+  let jobId = payload.resumeJobId;
   if (payload.resumeJobId) {
     const existing = await getDownload(payload.resumeJobId);
     if (!existing || existing.operation?.backend !== "yt-dlp" || existing.operation.kind !== "clip") {
@@ -372,10 +427,21 @@ async function startClip(payload: StartClipPayload): Promise<{ jobId: string }> 
     }
     await storeDownload(existing);
   } else {
-    await createCompanionJobState(jobId, summary, payload.selectionKey, "clip", clip);
+    const operationKey = companionOperationKey(summary, payload.selectionKey, "clip", clip);
+    const reserved = await reserveCompanionJob(operationKey);
+    if (reserved.duplicate) return { jobId: reserved.jobId };
+    jobId = reserved.jobId;
+    try {
+      await createCompanionJobState(jobId, summary, payload.selectionKey, "clip", clip);
+    } catch (error) {
+      releaseCompanionJobById(jobId);
+      throw error;
+    }
   }
-  let auth = await authBundle(payload, tab);
+  if (!jobId) throw companionError("INTERNAL_ERROR", "Media Sniper could not start that clip.");
+  let auth: CompanionAuthBundle = { mode: "anonymous" };
   try {
+    auth = await authBundle(payload, tab);
     await client.request("start_clip", { jobId, probeToken: payload.probeToken, selectionKey: payload.selectionKey, clip, allowFullDownloadFallback: payload.allowFullDownloadFallback === true, auth });
     return { jobId };
   } catch (error) { await failJob({ jobId, ...safeError(error) }); throw error; }
@@ -417,7 +483,16 @@ export function registerCompanionService(): void {
     dispatch(message).then((data) => sendResponse({ success: true, data })).catch((error) => sendResponse({ success: false, error: safeError(error) }));
     return true;
   });
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => { if (changeInfo.url) clearAnalysesForTab(tabId, changeInfo.url); });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!changeInfo.url) return;
+    clearAnalysesForTab(tabId, changeInfo.url);
+    if (tab.active) {
+      void chrome.runtime.sendMessage({
+        type: CompanionUiMessage.STATE_CHANGED,
+        payload: { activeTabChanged: true },
+      }).catch(() => undefined);
+    }
+  });
   chrome.tabs.onRemoved.addListener((tabId) => clearAnalysesForTab(tabId));
   chrome.tabs.onActivated.addListener(() => {
     void chrome.runtime.sendMessage({
