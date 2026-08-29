@@ -87,6 +87,11 @@ export function analyzedPageIdentity(raw: string): string {
   return url.toString();
 }
 
+/** Accept a public extractor-canonical page without treating it as tab identity. */
+export function validateCanonicalPageUrl(raw: string): URL {
+  return validatePublicPageUrl(raw);
+}
+
 export function validateAnalyzedPageBinding(
   activeTab: Pick<chrome.tabs.Tab, "id" | "url">,
   binding: AnalyzedPageBinding,
@@ -303,10 +308,10 @@ async function probe(choice: AuthChoice): Promise<YtDlpMediaSummary> {
     const event = await client.request("probe", { pageUrl: tab.url!, auth }, 90_000);
     if (event.type !== "probe_result") throw companionError("PROTOCOL_MISMATCH", "The companion returned an unexpected analysis result.");
     const summary = event.payload as YtDlpMediaSummary;
-    validatePublicPageUrl(summary.webpageUrl);
-    if (summary.webpageUrl !== tab.url && new URL(summary.webpageUrl).origin !== new URL(tab.url!).origin) {
-      throw companionError("INVALID_REQUEST", "The analysis result did not match the active page.");
-    }
+    // Extractors legitimately canonicalize across origins (for example,
+    // youtu.be to www.youtube.com). This URL is execution/output identity only;
+    // starts remain bound to the exact requested tab and page below.
+    validateCanonicalPageUrl(summary.webpageUrl);
     // Replace only this tab's prior analysis. A probe in another tab must not
     // invalidate a still-current page binding.
     clearAnalysesForTab(tab.id!);

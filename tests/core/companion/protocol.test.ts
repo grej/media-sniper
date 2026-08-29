@@ -78,6 +78,8 @@ describe("companion protocol", () => {
     expect(validateCompanionRequest({ ...fixture("hello.json") as object, protocolVersion: 2 })).toBe(false);
     expect(validateCompanionRequest(createCompanionEnvelope("run_command", "bad", {}))).toBe(false);
     expect(isCompanionEnvelope({ protocolVersion: 1, requestId: "x", type: "hello", payload: "bad" })).toBe(false);
+    expect(isCompanionEnvelope({ protocolVersion: 1, requestId: "bad.id", type: "hello", payload: {} })).toBe(false);
+    expect(validateSchema({ protocolVersion: 1, requestId: "bad id", type: "install_tools", payload: {} })).toBe(false);
   });
 
   it("rejects raw probe fields and malformed progress instead of trusting the host", () => {
@@ -85,6 +87,12 @@ describe("companion protocol", () => {
     expect(validateCompanionEvent({ ...probe, payload: { ...probe.payload, formats: [{ url: "https://signed.invalid" }] } })).toBe(false);
     const progress = fixture("job-progress.json") as { payload: Record<string, unknown> };
     expect(validateCompanionEvent({ ...progress, payload: { ...progress.payload, percentage: 101 } })).toBe(false);
+    expect(validateCompanionEvent(schemaEnvelope("job_completed", {
+      ...validByType.job_completed, durationMs: 10.5,
+    }))).toBe(false);
+    expect(validateSchema(schemaEnvelope("job_completed", {
+      ...validByType.job_completed, durationMs: 10.5,
+    }))).toBe(false);
   });
 
   it("rejects request-side arbitrary arguments, paths, and selection extras", () => {

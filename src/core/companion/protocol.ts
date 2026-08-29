@@ -131,6 +131,22 @@ function integer(value: unknown, minimum = 0): boolean {
   return Number.isSafeInteger(value) && (value as number) >= minimum;
 }
 
+function optionalInteger(value: unknown): boolean {
+  return value === undefined || integer(value);
+}
+
+function requestId(value: unknown): value is string {
+  return boundedString(value, 128) && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function jobId(value: unknown): value is string {
+  return boundedString(value, 128) && /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(value);
+}
+
+function optionalJobId(value: unknown): boolean {
+  return value === undefined || jobId(value);
+}
+
 function httpUrl(value: unknown): value is string {
   if (!boundedString(value, 8192)) return false;
   try {
@@ -167,7 +183,7 @@ function validAuth(value: unknown): boolean {
 function validSelection(value: unknown): boolean {
   if (!isRecord(value) || !onlyKeys(value, ["kind", "key", "label", "estimatedBytes", "expectedContainer", "videoFormatId", "audioFormatId"])) return false;
   if ((value.kind !== "preset" && value.kind !== "formats") || !boundedString(value.key, 128) || !boundedString(value.label, 512)) return false;
-  if (!optionalNonNegativeNumber(value.estimatedBytes) || !optionalBoundedString(value.expectedContainer, 32) ||
+  if (!optionalInteger(value.estimatedBytes) || !optionalBoundedString(value.expectedContainer, 32) ||
       !optionalBoundedString(value.videoFormatId, 128) || !optionalBoundedString(value.audioFormatId, 128)) return false;
   if (value.kind === "preset" && !["best", "best-mp4", "up-to-1080p", "up-to-720p", "audio-only"].includes(String(value.key))) return false;
   return true;
@@ -187,7 +203,7 @@ function validSummary(value: unknown): boolean {
 
 function validFailure(value: unknown): boolean {
   return isRecord(value) && onlyKeys(value, ["jobId", "code", "message", "recoverable"]) &&
-    optionalBoundedString(value.jobId, 128) && ERROR_CODES.has(String(value.code)) &&
+    optionalJobId(value.jobId) && ERROR_CODES.has(String(value.code)) &&
     boundedString(value.message, 4096) && typeof value.recoverable === "boolean";
 }
 
@@ -222,11 +238,11 @@ function validRequestPayload(type: string, payload: Record<string, unknown>): bo
       return onlyKeys(payload, ["pageUrl", "auth"]) && httpUrl(payload.pageUrl) && validAuth(payload.auth);
     case "start_download":
       return onlyKeys(payload, ["jobId", "probeToken", "selectionKey", "auth"]) &&
-        boundedString(payload.jobId, 128) && boundedString(payload.probeToken, 512) &&
+        jobId(payload.jobId) && boundedString(payload.probeToken, 512) &&
         boundedString(payload.selectionKey, 128) && validAuth(payload.auth);
     case "start_clip": {
       if (!onlyKeys(payload, ["jobId", "probeToken", "selectionKey", "clip", "allowFullDownloadFallback", "auth"]) ||
-          !boundedString(payload.jobId, 128) || !boundedString(payload.probeToken, 512) ||
+          !jobId(payload.jobId) || !boundedString(payload.probeToken, 512) ||
           !boundedString(payload.selectionKey, 128) || typeof payload.allowFullDownloadFallback !== "boolean" ||
           !validAuth(payload.auth) || !isRecord(payload.clip)) return false;
       const clip = payload.clip;
@@ -234,7 +250,7 @@ function validRequestPayload(type: string, payload: Record<string, unknown>): bo
         (clip.endMs as number) > (clip.startMs as number) && (clip.mode === "fast" || clip.mode === "exact");
     }
     case "cancel_job":
-      return onlyKeys(payload, ["jobId"]) && boundedString(payload.jobId, 128);
+      return onlyKeys(payload, ["jobId"]) && jobId(payload.jobId);
     case "reveal_output":
     case "open_output":
       return onlyKeys(payload, ["outputToken"]) && boundedString(payload.outputToken, 512);
@@ -252,10 +268,10 @@ function validEventPayload(type: string, payload: Record<string, unknown>): bool
     case "probe_result": return validSummary(payload);
     case "auth_required":
     case "job_failed": return validFailure(payload);
-    case "job_queued": return onlyKeys(payload, ["jobId", "position"]) && boundedString(payload.jobId, 128) && integer(payload.position);
+    case "job_queued": return onlyKeys(payload, ["jobId", "position"]) && jobId(payload.jobId) && integer(payload.position);
     case "job_progress":
       return onlyKeys(payload, ["jobId", "stage", "downloadedBytes", "totalBytes", "percentage", "speedBytesPerSecond", "etaSeconds", "mediaRole", "detail"]) &&
-        boundedString(payload.jobId, 128) && ["planning", "downloading", "merging", "processing", "saving", "completed"].includes(String(payload.stage)) &&
+        jobId(payload.jobId) && ["planning", "downloading", "merging", "processing", "saving", "completed"].includes(String(payload.stage)) &&
         (payload.downloadedBytes === undefined || integer(payload.downloadedBytes)) &&
         (payload.totalBytes === undefined || integer(payload.totalBytes)) &&
         (payload.percentage === undefined || (nonNegativeNumber(payload.percentage) && (payload.percentage as number) <= 100)) &&
@@ -263,18 +279,18 @@ function validEventPayload(type: string, payload: Record<string, unknown>): bool
         (payload.mediaRole === undefined || ["audio", "video", "combined"].includes(String(payload.mediaRole))) &&
         optionalBoundedString(payload.detail, 4096);
     case "fallback_required":
-      return onlyKeys(payload, ["jobId", "reason", "estimatedBytes"]) && boundedString(payload.jobId, 128) &&
+      return onlyKeys(payload, ["jobId", "reason", "estimatedBytes"]) && jobId(payload.jobId) &&
         ["section-unsupported", "section-invalid", "exact-validation-failed"].includes(String(payload.reason)) &&
-        optionalNonNegativeNumber(payload.estimatedBytes);
+        optionalInteger(payload.estimatedBytes);
     case "job_completed":
       return onlyKeys(payload, ["jobId", "outputToken", "filename", "finalPath", "byteSize", "container", "durationMs", "extractorKey", "mediaId", "accuracy", "actualStartMs", "actualDurationMs"]) &&
-        boundedString(payload.jobId, 128) && boundedString(payload.outputToken, 512) && boundedString(payload.filename, 1024) &&
+        jobId(payload.jobId) && boundedString(payload.outputToken, 512) && boundedString(payload.filename, 1024) &&
         boundedString(payload.finalPath, 8192) && integer(payload.byteSize) && boundedString(payload.container, 32) &&
-        optionalNonNegativeNumber(payload.durationMs) && boundedString(payload.extractorKey, 128) && boundedString(payload.mediaId, 512) &&
+        optionalInteger(payload.durationMs) && boundedString(payload.extractorKey, 128) && boundedString(payload.mediaId, 512) &&
         (payload.accuracy === undefined || payload.accuracy === "keyframe-aligned" || payload.accuracy === "exact") &&
-        optionalNonNegativeNumber(payload.actualStartMs) && optionalNonNegativeNumber(payload.actualDurationMs);
+        optionalInteger(payload.actualStartMs) && optionalInteger(payload.actualDurationMs);
     case "job_cancelled":
-      return onlyKeys(payload, ["jobId"]) && boundedString(payload.jobId, 128);
+      return onlyKeys(payload, ["jobId"]) && jobId(payload.jobId);
     case "tool_progress":
       return onlyKeys(payload, ["stage", "percentage", "detail"]) && boundedString(payload.stage, 128) &&
         (payload.percentage === undefined || (nonNegativeNumber(payload.percentage) && (payload.percentage as number) <= 100)) &&
@@ -288,9 +304,7 @@ export function isCompanionEnvelope(value: unknown): value is CompanionEnvelope 
   if (!isRecord(value)) return false;
   return (
     value.protocolVersion === COMPANION_PROTOCOL_VERSION &&
-    typeof value.requestId === "string" &&
-    value.requestId.length > 0 &&
-    value.requestId.length <= 128 &&
+    requestId(value.requestId) &&
     typeof value.type === "string" &&
     value.type.length > 0 &&
     isRecord(value.payload) &&

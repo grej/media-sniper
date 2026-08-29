@@ -229,7 +229,7 @@ fn current_tab_cookie_secret_is_ephemeral_and_never_emitted() {
 #[test]
 fn canonicalized_youtube_url_keeps_download_clip_and_auth_bound_to_requested_page() {
     let mut harness = Harness::new();
-    let requested = "https://www.youtube.com/watch?v=id&t=30s";
+    let requested = "https://youtu.be/id?t=30";
     let canonical = "https://www.youtube.com/watch?v=id";
     let token = harness.probe(requested, current_tab_auth(requested));
     let summary = harness.wait("probe_result", None);
@@ -256,7 +256,7 @@ fn canonicalized_youtube_url_keeps_download_clip_and_auth_bound_to_requested_pag
     );
     harness.wait("job_completed", Some("canonical-clip"));
 
-    let different = "https://www.youtube.com/watch?v=other";
+    let different = "https://youtu.be/other";
     harness.send(
         "wrong-page",
         "start_download",

@@ -102,8 +102,37 @@ pub fn probe(
     cancelled: &Arc<AtomicBool>,
     timeout: Duration,
 ) -> Result<(MediaSummary, ProbeRecord), HostError> {
+    probe_with_resolver(
+        request,
+        runner,
+        temp_root,
+        brave_profiles,
+        developer_mode,
+        cancelled,
+        timeout,
+        validate_resolved_public_page_url,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn probe_with_resolver<F>(
+    request: &ProbeRequest,
+    runner: &ProcessRunner,
+    temp_root: &Path,
+    brave_profiles: &[String],
+    developer_mode: bool,
+    cancelled: &Arc<AtomicBool>,
+    timeout: Duration,
+    resolve_page: F,
+) -> Result<(MediaSummary, ProbeRecord), HostError>
+where
+    F: FnOnce(&url::Url, bool) -> Result<(), HostError>,
+{
     let page_url = validate_public_page_url(&request.page_url, developer_mode)?;
     validate_auth_page(&request.auth, page_url.as_str(), developer_mode)?;
+    // DNS must finish before a temporary directory or current-tab cookie jar
+    // containing authentication material can exist.
+    resolve_page(&page_url, developer_mode)?;
     let temp = ProbeTemp::create(temp_root)?;
     let prepared_auth =
         PreparedAuth::prepare(&request.auth, temp.path(), brave_profiles, developer_mode)?;
@@ -126,7 +155,6 @@ pub fn probe(
     args.extend(prepared_auth.args.iter().cloned());
     args.push("--".to_owned());
     args.push(page_url.to_string());
-    validate_resolved_public_page_url(&page_url, developer_mode)?;
     let output = runner.run(
         ManagedTool::YtDlp,
         &args,
@@ -459,6 +487,8 @@ impl Drop for ProbeTemp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::{CookieRecord, CookieSameSite};
+    use crate::tools::ToolPaths;
     use serde_json::json;
 
     #[test]
@@ -508,6 +538,66 @@ mod tests {
             cookies: vec![],
         };
         assert!(validate_auth_page(&auth, "https://good.example/watch", false).is_err());
+    }
+
+    #[test]
+    fn dns_validation_precedes_probe_temp_and_cookie_materialization() {
+        let root = tempfile::tempdir().unwrap();
+        let temp_root = root.path().join("probe-jobs");
+        let tools = root.path().join("tools");
+        let runner = ProcessRunner::new(
+            ToolPaths {
+                yt_dlp: tools.join("yt-dlp"),
+                ffmpeg: tools.join("ffmpeg"),
+                ffprobe: tools.join("ffprobe"),
+                js_runtime: Some(tools.join("deno")),
+                bin_dir: tools,
+            },
+            root.path().join("runtime-home"),
+            root.path().join("user-home"),
+        );
+        let url = "https://public-looking.example/watch";
+        let request = ProbeRequest {
+            page_url: url.into(),
+            auth: AuthRequest::CurrentTab {
+                page_url: url.into(),
+                referer: url.into(),
+                user_agent: "Brave secret agent".into(),
+                cookie_store_id: "store-1".into(),
+                incognito: false,
+                cookies: vec![CookieRecord {
+                    name: "session".into(),
+                    value: "secret".into(),
+                    domain: ".example".into(),
+                    path: "/".into(),
+                    secure: true,
+                    http_only: true,
+                    same_site: CookieSameSite::Lax,
+                    host_only: false,
+                    expiration_date: None,
+                    session: true,
+                }],
+            },
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let result = probe_with_resolver(
+            &request,
+            &runner,
+            &temp_root,
+            &[],
+            false,
+            &cancelled,
+            Duration::from_secs(1),
+            |_, _| {
+                assert!(!temp_root.exists());
+                Err(HostError::new(
+                    ErrorCode::UrlUnsupported,
+                    "fixture DNS rejection",
+                ))
+            },
+        );
+        assert_eq!(result.unwrap_err().code, ErrorCode::UrlUnsupported);
+        assert!(!temp_root.exists());
     }
 
     #[test]

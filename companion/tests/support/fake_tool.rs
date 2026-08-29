@@ -56,7 +56,7 @@ fn fake_ytdlp(args: &[String]) {
             );
             return;
         }
-        let webpage_url = if url == "https://www.youtube.com/watch?v=id&t=30s" {
+        let webpage_url = if url == "https://youtu.be/id?t=30" {
             "https://www.youtube.com/watch?v=id".to_owned()
         } else {
             url.clone()

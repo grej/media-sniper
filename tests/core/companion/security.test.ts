@@ -5,6 +5,7 @@ import {
   createCompanionJobState,
   shouldInvalidateAnalyzedPage,
   validateAnalyzedPageBinding,
+  validateCanonicalPageUrl,
   validatePublicPageUrl,
 } from "@/core/companion/service";
 import { getDownload } from "@/core/database/downloads";
@@ -48,6 +49,18 @@ describe("companion page boundary", () => {
     expect(() => validateAnalyzedPageBinding({ id: 8, url: requested }, binding)).toThrow();
     expect(shouldInvalidateAnalyzedPage(binding, 8, "https://other.test/")).toBe(false);
     expect(shouldInvalidateAnalyzedPage(binding, 7, "https://www.youtube.com/watch?v=other")).toBe(true);
+  });
+
+  it("accepts cross-origin extractor canonicalization without changing start binding", () => {
+    const requested = "https://youtu.be/id?t=30";
+    const canonical = "https://www.youtube.com/watch?v=id";
+    const binding = { tabId: 9, requestedPageUrl: analyzedPageIdentity(requested) };
+
+    expect(validateCanonicalPageUrl(canonical).toString()).toBe(canonical);
+    expect(() => validateAnalyzedPageBinding({ id: 9, url: requested }, binding)).not.toThrow();
+    expect(() => validateAnalyzedPageBinding({ id: 9, url: canonical }, binding)).toThrow();
+    expect(() => validateAnalyzedPageBinding({ id: 10, url: requested }, binding)).toThrow();
+    expect(() => validateCanonicalPageUrl("http://127.0.0.1/private")).toThrow();
   });
 });
 

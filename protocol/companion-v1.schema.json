@@ -7,7 +7,7 @@
   "required": ["protocolVersion", "requestId", "type", "payload"],
   "properties": {
     "protocolVersion": { "const": 1 },
-    "requestId": { "$ref": "#/$defs/id" },
+    "requestId": { "$ref": "#/$defs/requestId" },
     "type": {
       "enum": [
         "hello", "probe", "start_download", "start_clip", "cancel_job",
@@ -38,7 +38,8 @@
     { "if": { "properties": { "type": { "const": "tool_progress" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/toolProgress" } } } }
   ],
   "$defs": {
-    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$" },
     "token": { "type": "string", "minLength": 1, "maxLength": 512 },
     "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
     "httpUrl": { "type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^[hH][tT][tT][pP][sS]?://" },
@@ -248,12 +249,12 @@
         "finalPath": { "type": "string", "minLength": 1, "maxLength": 8192 },
         "byteSize": { "type": "integer", "minimum": 0 },
         "container": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "durationMs": { "type": "number", "minimum": 0 },
+        "durationMs": { "type": "integer", "minimum": 0 },
         "extractorKey": { "type": "string", "minLength": 1, "maxLength": 128 },
         "mediaId": { "type": "string", "minLength": 1, "maxLength": 512 },
         "accuracy": { "enum": ["keyframe-aligned", "exact"] },
-        "actualStartMs": { "type": "number", "minimum": 0 },
-        "actualDurationMs": { "type": "number", "minimum": 0 }
+        "actualStartMs": { "type": "integer", "minimum": 0 },
+        "actualDurationMs": { "type": "integer", "minimum": 0 }
       }
     },
     "toolProgress": {

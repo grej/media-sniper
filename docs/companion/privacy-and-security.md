@@ -43,7 +43,9 @@ receipt, not the file contents.
 
 Before every production yt-dlp launch, the host resolves the initial page name
 and rejects empty, mixed, loopback, link-local, or private DNS answers. This
-closes split-horizon and simple rebinding paths at launch time. Redirect-time
+resolution has a five-second deadline and completes before the host creates a
+job directory or materializes current-tab cookies. This closes split-horizon
+and simple rebinding paths at launch time. Redirect-time
 address confinement inside the managed yt-dlp transport remains a release
 security consideration: acceptance must test redirect behavior, and the
 managed runtime must remain patched and tightly configured.

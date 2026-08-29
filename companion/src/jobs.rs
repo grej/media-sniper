@@ -313,7 +313,14 @@ impl JobExecutor {
             self.developer_mode,
         )?;
         let selection = probe.selection(&request.selection_key)?;
-        let temp = JobTemp::create(&self.temp_root)?;
+        let context = prepare_job_context_with_resolver(
+            &request.auth,
+            &probe.page_url,
+            &self.temp_root,
+            &self.brave_profiles,
+            self.developer_mode,
+            validate_resolved_public_page_url,
+        )?;
         self.emit_progress(request_id, &request.job_id, "planning", None, None);
         let source = self.run_ytdlp(
             request_id,
@@ -321,12 +328,13 @@ impl JobExecutor {
             probe,
             selection,
             &request.auth,
-            temp.path(),
+            &context.auth,
+            context.path(),
             None,
             cancelled,
         )?;
         self.emit_progress(request_id, &request.job_id, "saving", None, None);
-        let metrics = probe_media(&self.runner, &source, temp.path(), cancelled).ok();
+        let metrics = probe_media(&self.runner, &source, context.path(), cancelled).ok();
         let saved = save_output(
             &source,
             &self.output_root,
@@ -352,19 +360,21 @@ impl JobExecutor {
             self.developer_mode,
         )?;
         let selection = probe.selection(&request.selection_key)?;
-        let temp = JobTemp::create(&self.temp_root)?;
-        self.emit_progress(request_id, &request.job_id, "planning", None, None);
         if request.allow_full_download_fallback {
             self.fallbacks.consume(request)?;
+        }
+        let context = prepare_job_context_with_resolver(
+            &request.auth,
+            &probe.page_url,
+            &self.temp_root,
+            &self.brave_profiles,
+            self.developer_mode,
+            validate_resolved_public_page_url,
+        )?;
+        self.emit_progress(request_id, &request.job_id, "planning", None, None);
+        if request.allow_full_download_fallback {
             return self
-                .fallback_clip(
-                    request_id,
-                    request,
-                    probe,
-                    selection,
-                    temp.path(),
-                    cancelled,
-                )
+                .fallback_clip(request_id, request, probe, selection, &context, cancelled)
                 .map(Some);
         }
         let direct = self.run_ytdlp(
@@ -373,12 +383,13 @@ impl JobExecutor {
             probe,
             selection,
             &request.auth,
-            temp.path(),
+            &context.auth,
+            context.path(),
             Some(&request.clip),
             cancelled,
         );
         match direct.and_then(|path| {
-            let metrics = probe_media(&self.runner, &path, temp.path(), cancelled)?;
+            let metrics = probe_media(&self.runner, &path, context.path(), cancelled)?;
             validate_clip_output(&metrics, &request.clip, selection.audio_only)?;
             Ok((path, metrics))
         }) {
@@ -429,7 +440,7 @@ impl JobExecutor {
         request: &StartClipRequest,
         probe: &ProbeRecord,
         selection: &CachedSelection,
-        job_dir: &Path,
+        context: &PreparedJobContext,
         cancelled: &Arc<AtomicBool>,
     ) -> Result<JobCompleted, HostError> {
         self.emit_progress(
@@ -445,7 +456,8 @@ impl JobExecutor {
             probe,
             selection,
             &request.auth,
-            job_dir,
+            &context.auth,
+            context.path(),
             None,
             cancelled,
         )?;
@@ -456,7 +468,7 @@ impl JobExecutor {
             Some("Creating clip locally"),
             None,
         );
-        let output = job_dir.join(match request.clip.mode {
+        let output = context.path().join(match request.clip.mode {
             ClipMode::Fast => "fallback-clip.mkv",
             ClipMode::Exact => "fallback-clip.mp4",
         });
@@ -464,7 +476,7 @@ impl JobExecutor {
         let process = self.runner.run(
             ManagedTool::Ffmpeg,
             &args,
-            job_dir,
+            context.path(),
             RunPolicy::standard(false),
             cancelled,
             |_| {},
@@ -483,7 +495,7 @@ impl JobExecutor {
                 diagnostic,
             ));
         }
-        let metrics = probe_media(&self.runner, &output, job_dir, cancelled)?;
+        let metrics = probe_media(&self.runner, &output, context.path(), cancelled)?;
         validate_clip_output(&metrics, &request.clip, selection.audio_only).map_err(|_| {
             HostError::new(
                 if request.clip.mode == ClipMode::Exact {
@@ -523,12 +535,11 @@ impl JobExecutor {
         probe: &ProbeRecord,
         selection: &CachedSelection,
         auth: &AuthRequest,
+        prepared_auth: &PreparedAuth,
         job_dir: &Path,
         clip: Option<&ClipSpec>,
         cancelled: &Arc<AtomicBool>,
     ) -> Result<PathBuf, HostError> {
-        let prepared_auth =
-            PreparedAuth::prepare(auth, job_dir, &self.brave_profiles, self.developer_mode)?;
         let mut args = yt_dlp_download_args(
             probe,
             selection,
@@ -547,8 +558,6 @@ impl JobExecutor {
             url_index - 1..url_index - 1,
             prepared_auth.args.iter().cloned(),
         );
-        let execution_url = validate_public_page_url(&probe.page_url, self.developer_mode)?;
-        validate_resolved_public_page_url(&execution_url, self.developer_mode)?;
         let mut file = None;
         let process = self.runner.run(
             ManagedTool::YtDlp,
@@ -639,6 +648,26 @@ impl JobExecutor {
         (self.sink)(Envelope::response(request_id, message_type, payload)?);
         Ok(())
     }
+}
+
+fn prepare_job_context_with_resolver<F>(
+    auth: &AuthRequest,
+    page_url: &str,
+    temp_root: &Path,
+    brave_profiles: &[String],
+    developer_mode: bool,
+    resolve_page: F,
+) -> Result<PreparedJobContext, HostError>
+where
+    F: FnOnce(&url::Url, bool) -> Result<(), HostError>,
+{
+    let execution_url = validate_public_page_url(page_url, developer_mode)?;
+    // Resolve before either the job directory or current-tab authentication
+    // can be materialized on disk.
+    resolve_page(&execution_url, developer_mode)?;
+    let temp = JobTemp::create(temp_root)?;
+    let auth = PreparedAuth::prepare(auth, temp.path(), brave_profiles, developer_mode)?;
+    Ok(PreparedJobContext { temp, auth })
 }
 
 fn fallback_reason(error: &HostError) -> Option<&'static str> {
@@ -1151,6 +1180,17 @@ struct JobTemp {
     path: PathBuf,
 }
 
+struct PreparedJobContext {
+    temp: JobTemp,
+    auth: PreparedAuth,
+}
+
+impl PreparedJobContext {
+    fn path(&self) -> &Path {
+        self.temp.path()
+    }
+}
+
 impl JobTemp {
     fn create(root: &Path) -> Result<Self, HostError> {
         fs::create_dir_all(root)?;
@@ -1248,6 +1288,46 @@ mod tests {
         assert!(args.contains(&"--no-remote-components".to_owned()));
         assert!(args.contains(&"deno:/controlled/tools/deno".to_owned()));
         assert!(!args.iter().any(|arg| arg == "--exec"));
+    }
+
+    #[test]
+    fn dns_validation_precedes_job_cookie_materialization() {
+        let root = tempdir().unwrap();
+        let temp_root = root.path().join("jobs");
+        let url = "https://public-looking.example/watch";
+        let auth = AuthRequest::CurrentTab {
+            page_url: url.into(),
+            referer: url.into(),
+            user_agent: "Brave secret agent".into(),
+            cookie_store_id: "store-1".into(),
+            incognito: false,
+            cookies: vec![crate::protocol::CookieRecord {
+                name: "session".into(),
+                value: "secret".into(),
+                domain: ".example".into(),
+                path: "/".into(),
+                secure: true,
+                http_only: true,
+                same_site: crate::protocol::CookieSameSite::Lax,
+                host_only: false,
+                expiration_date: None,
+                session: true,
+            }],
+        };
+        let result =
+            prepare_job_context_with_resolver(&auth, url, &temp_root, &[], false, |_, _| {
+                assert!(!temp_root.exists());
+                Err(HostError::new(
+                    ErrorCode::UrlUnsupported,
+                    "fixture DNS rejection",
+                ))
+            });
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("DNS rejection unexpectedly prepared authentication"),
+        };
+        assert_eq!(error.code, ErrorCode::UrlUnsupported);
+        assert!(!temp_root.exists());
     }
 
     #[test]

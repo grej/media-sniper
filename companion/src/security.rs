@@ -1,11 +1,16 @@
 use crate::protocol::{ErrorCode, HostError};
 use std::fs;
+use std::io;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Component, Path};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use url::{Host, Url};
 
 pub const MAX_URL_LENGTH: usize = 8192;
 pub const MAX_TEXT_LENGTH: usize = 512;
+const DNS_RESOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn create_private_dir(path: &Path) -> Result<(), HostError> {
     let mut builder = fs::DirBuilder::new();
@@ -105,10 +110,32 @@ fn ip_is_non_public(ip: IpAddr) -> bool {
 /// closed if DNS yields any address in a non-public range.
 pub fn validate_resolved_public_page_url(url: &Url, developer_mode: bool) -> Result<(), HostError> {
     validate_resolved_public_page_url_with(url, developer_mode, |host, port| {
-        (host, port)
-            .to_socket_addrs()
-            .map(|addresses| addresses.map(|address| address.ip()).collect())
+        let host = host.to_owned();
+        resolve_with_timeout(
+            move || {
+                (host.as_str(), port)
+                    .to_socket_addrs()
+                    .map(|addresses| addresses.map(|address| address.ip()).collect())
+            },
+            DNS_RESOLUTION_TIMEOUT,
+        )
     })
+}
+
+fn resolve_with_timeout<F>(resolver: F, timeout: Duration) -> io::Result<Vec<IpAddr>>
+where
+    F: FnOnce() -> io::Result<Vec<IpAddr>> + Send + 'static,
+{
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = sender.send(resolver());
+    });
+    receiver.recv_timeout(timeout).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "Page host resolution exceeded the companion deadline",
+        )
+    })?
 }
 
 pub fn validate_resolved_public_page_url_with<F>(
@@ -312,6 +339,20 @@ mod tests {
         let public = |_host: &str, _port: u16| Ok(vec!["93.184.216.34".parse().unwrap()]);
         assert!(validate_resolved_public_page_url_with(&url, false, public).is_ok());
         assert!(validate_resolved_public_page_url_with(&url, true, private).is_ok());
+    }
+
+    #[test]
+    fn host_resolution_has_a_deadline() {
+        let started = std::time::Instant::now();
+        let result = resolve_with_timeout(
+            || {
+                thread::sleep(Duration::from_millis(300));
+                Ok(vec!["93.184.216.34".parse().unwrap()])
+            },
+            Duration::from_millis(10),
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_millis(250));
     }
 
     #[test]
