@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-sniper.invalid/protocol/companion-v1.schema.json",
+  "title": "Media Sniper companion protocol v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "requestId", "type", "payload"],
+  "properties": {
+    "protocolVersion": { "const": 1 },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "type": {
+      "enum": [
+        "hello", "probe", "start_download", "start_clip", "cancel_job",
+        "reveal_output", "open_output", "install_tools", "update_tools",
+        "hello_result", "probe_result", "auth_required", "job_queued",
+        "job_progress", "fallback_required", "job_completed", "job_failed",
+        "job_cancelled", "tool_progress"
+      ]
+    },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "hello" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/hello" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "probe" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/probe" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "start_download" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/startDownload" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "start_clip" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/startClip" } } }
+    },
+    {
+      "if": { "properties": { "type": { "enum": ["cancel_job"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/jobRef" } } }
+    },
+    {
+      "if": { "properties": { "type": { "enum": ["reveal_output", "open_output"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/outputRef" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "probe_result" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/summary" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "job_progress" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/progress" } } }
+    },
+    {
+      "if": { "properties": { "type": { "enum": ["job_failed", "auth_required"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/failure" } } }
+    }
+  ],
+  "$defs": {
+    "safeString": { "type": "string", "maxLength": 4096 },
+    "httpUrl": { "type": "string", "maxLength": 8192, "pattern": "^https?://" },
+    "hello": {
+      "type": "object", "additionalProperties": false,
+      "required": ["browserTarget", "extensionVersion"],
+      "properties": {
+        "browserTarget": { "enum": ["brave", "chrome", "chromium", "unknown"] },
+        "extensionVersion": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "cookie": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "hostOnly", "session"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 1024 },
+        "value": { "type": "string", "maxLength": 8192 },
+        "domain": { "type": "string", "maxLength": 1024 },
+        "path": { "type": "string", "maxLength": 2048 },
+        "secure": { "type": "boolean" }, "httpOnly": { "type": "boolean" },
+        "sameSite": { "enum": ["no_restriction", "lax", "strict", "unspecified"] },
+        "expirationDate": { "type": "number" }, "hostOnly": { "type": "boolean" },
+        "session": { "type": "boolean" }
+      }
+    },
+    "auth": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "const": "anonymous" } } },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["mode", "pageUrl", "referer", "userAgent", "cookieStoreId", "incognito", "cookies"],
+          "properties": {
+            "mode": { "const": "current-tab" }, "pageUrl": { "$ref": "#/$defs/httpUrl" },
+            "referer": { "$ref": "#/$defs/httpUrl" }, "userAgent": { "type": "string", "maxLength": 1024 },
+            "cookieStoreId": { "type": "string", "maxLength": 128 }, "incognito": { "type": "boolean" },
+            "cookies": { "type": "array", "maxItems": 2048, "items": { "$ref": "#/$defs/cookie" } }
+          }
+        },
+        { "type": "object", "additionalProperties": false, "required": ["mode", "profileId"], "properties": { "mode": { "const": "brave-profile" }, "profileId": { "type": "string", "maxLength": 128 } } }
+      ]
+    },
+    "probe": {
+      "type": "object", "additionalProperties": false, "required": ["pageUrl", "auth"],
+      "properties": { "pageUrl": { "$ref": "#/$defs/httpUrl" }, "auth": { "$ref": "#/$defs/auth" } }
+    },
+    "startDownload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["jobId", "probeToken", "selectionKey", "auth"],
+      "properties": { "jobId": { "$ref": "#/$defs/safeString" }, "probeToken": { "$ref": "#/$defs/safeString" }, "selectionKey": { "$ref": "#/$defs/safeString" }, "auth": { "$ref": "#/$defs/auth" } }
+    },
+    "startClip": {
+      "type": "object", "additionalProperties": false,
+      "required": ["jobId", "probeToken", "selectionKey", "auth", "clip", "allowFullDownloadFallback"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/safeString" }, "probeToken": { "$ref": "#/$defs/safeString" },
+        "selectionKey": { "$ref": "#/$defs/safeString" }, "auth": { "$ref": "#/$defs/auth" },
+        "clip": { "type": "object", "additionalProperties": false, "required": ["startMs", "endMs", "mode"], "properties": { "startMs": { "type": "integer", "minimum": 0 }, "endMs": { "type": "integer", "minimum": 1 }, "mode": { "enum": ["fast", "exact"] } } },
+        "allowFullDownloadFallback": { "type": "boolean" }
+      }
+    },
+    "jobRef": { "type": "object", "additionalProperties": false, "required": ["jobId"], "properties": { "jobId": { "$ref": "#/$defs/safeString" } } },
+    "outputRef": { "type": "object", "additionalProperties": false, "required": ["outputToken"], "properties": { "outputToken": { "$ref": "#/$defs/safeString" } } },
+    "selection": {
+      "type": "object", "required": ["kind", "key", "label"],
+      "properties": { "kind": { "enum": ["preset", "formats"] }, "key": { "$ref": "#/$defs/safeString" }, "label": { "$ref": "#/$defs/safeString" }, "estimatedBytes": { "type": "integer", "minimum": 0 }, "expectedContainer": { "type": "string", "maxLength": 32 }, "videoFormatId": { "$ref": "#/$defs/safeString" }, "audioFormatId": { "$ref": "#/$defs/safeString" } }
+    },
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["extractorKey", "mediaId", "webpageUrl", "title", "isLive", "selections", "probeToken", "probedAt"],
+      "properties": { "extractorKey": { "$ref": "#/$defs/safeString" }, "mediaId": { "$ref": "#/$defs/safeString" }, "webpageUrl": { "$ref": "#/$defs/httpUrl" }, "title": { "$ref": "#/$defs/safeString" }, "durationMs": { "type": "integer", "minimum": 0 }, "thumbnailUrl": { "$ref": "#/$defs/httpUrl" }, "uploader": { "$ref": "#/$defs/safeString" }, "isLive": { "type": "boolean" }, "isDrm": { "type": "boolean" }, "selections": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/selection" } }, "probeToken": { "$ref": "#/$defs/safeString" }, "probedAt": { "type": "integer", "minimum": 0 } }
+    },
+    "progress": { "type": "object", "required": ["jobId", "stage"], "properties": { "jobId": { "$ref": "#/$defs/safeString" }, "stage": { "enum": ["planning", "downloading", "merging", "processing", "saving", "completed"] }, "downloadedBytes": { "type": "integer", "minimum": 0 }, "totalBytes": { "type": "integer", "minimum": 0 }, "percentage": { "type": "number", "minimum": 0, "maximum": 100 }, "speedBytesPerSecond": { "type": "number", "minimum": 0 }, "etaSeconds": { "type": "number", "minimum": 0 }, "detail": { "$ref": "#/$defs/safeString" } } },
+    "failure": { "type": "object", "required": ["code", "message", "recoverable"], "properties": { "jobId": { "$ref": "#/$defs/safeString" }, "code": { "type": "string", "maxLength": 64 }, "message": { "$ref": "#/$defs/safeString" }, "recoverable": { "type": "boolean" } } }
+  }
+}

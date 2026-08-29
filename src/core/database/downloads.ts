@@ -4,7 +4,12 @@
  */
 
 import { ChromeStorage } from "../storage/chrome-storage";
-import { DownloadState, DownloadProgress, DownloadStage } from "../types";
+import {
+  DownloadState,
+  DownloadProgress,
+  DownloadStage,
+  normalizeVideoMetadataSource,
+} from "../types";
 import { logger } from "../utils/logger";
 import { normalizeUrl } from "../utils/url-utils";
 import { openDatabase, DOWNLOADS_STORE_NAME } from "./connection";
@@ -24,13 +29,18 @@ const ACTIVE_STAGES = new Set<DownloadStage>([
 
 /** Add v4 operation defaults without making older persisted rows unreadable. */
 export function withOperationDefaults(state: DownloadState): DownloadState {
-  if (state.operation) return state;
-  return {
+  const normalized = {
     ...state,
+    metadata: normalizeVideoMetadataSource(state.metadata),
+  };
+  if (normalized.operation) return normalized;
+  return {
+    ...normalized,
     operation: {
       kind:
         state.progress.stage === DownloadStage.RECORDING ? "record" : "download",
       operationKey: `legacy:${state.id}`,
+      backend: "browser",
     },
   };
 }

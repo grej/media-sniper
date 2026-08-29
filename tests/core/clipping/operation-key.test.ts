@@ -45,6 +45,7 @@ describe("operation key", () => {
     [{ referrer: "https://site.test/other" }, "referrer"],
     [{ url: "https://example.com/video.mp4?token=other" }, "signed URL query"],
     [{ kind: "download" as const, clip: undefined }, "operation kind"],
+    [{ backend: "yt-dlp" as const }, "source backend"],
   ])("changes when $1 changes", (changes) => {
     const baseline = createOperationKey({
       url: "https://example.com/video.mp4?token=one",

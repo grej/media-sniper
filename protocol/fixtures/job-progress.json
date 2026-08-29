@@ -1,0 +1,1 @@
+{"protocolVersion":1,"requestId":"golden-progress","type":"job_progress","payload":{"jobId":"job-fixture","stage":"downloading","downloadedBytes":524288,"totalBytes":1048576,"percentage":50}}

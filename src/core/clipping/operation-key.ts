@@ -87,6 +87,7 @@ export function createOperationKey(input: OperationKeyInput): string {
 
   const canonical = {
     version: OPERATION_KEY_VERSION,
+    backend: input.backend ?? "browser",
     url,
     kind: input.kind,
     clip,
