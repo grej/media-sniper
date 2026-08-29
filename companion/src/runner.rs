@@ -141,7 +141,7 @@ impl ProcessRunner {
             thread::spawn(move || read_lines_bounded(stdout, line_tx, MAX_STDOUT_BYTES));
         let stderr_thread = thread::spawn(move || read_bytes_bounded(stderr, MAX_STDERR_BYTES));
         let mut stdout_lines = Vec::new();
-        let mut termination_started = None;
+        let mut termination_started: Option<Instant> = None;
         let deadline = policy.timeout.map(|timeout| Instant::now() + timeout);
         let mut timed_out = false;
         let mut stdout_overflow = false;
@@ -160,11 +160,13 @@ impl ProcessRunner {
                 timed_out = true;
             }
             if cancelled.load(Ordering::Acquire) || timed_out || stdout_overflow {
-                if termination_started.is_none() {
+                if let Some(started) = termination_started {
+                    if started.elapsed() >= Duration::from_secs(2) {
+                        terminate_process_group(&mut child, true);
+                    }
+                } else {
                     terminate_process_group(&mut child, false);
                     termination_started = Some(Instant::now());
-                } else if termination_started.unwrap().elapsed() >= Duration::from_secs(2) {
-                    terminate_process_group(&mut child, true);
                 }
             }
             if let Some(status) = child.try_wait()? {

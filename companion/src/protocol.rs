@@ -155,19 +155,14 @@ impl From<&HostError> for ErrorPayload {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BrowserTarget {
     Brave,
     Chrome,
     Chromium,
+    #[default]
     Unknown,
-}
-
-impl Default for BrowserTarget {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Default, Deserialize)]
