@@ -19,6 +19,11 @@ import {
   DEFAULT_CLIP_OVERLAY_ENABLED,
   STORAGE_CONFIG_KEY,
 } from "./shared/constants";
+import {
+  applyBestDirectMediaAsset,
+  directMediaAssetFromMetadata,
+  mergeDirectMediaAssets,
+} from "./core/media/direct-media-assets";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
@@ -29,6 +34,9 @@ const inIframe = window.self !== window.top;
 const playbackRegistry = new PlaybackRegistry();
 
 function detectedVideoKey(video: VideoMetadata): string {
+  if (video.format === VideoFormat.DIRECT && video.pageVideoId) {
+    return `direct:${video.pageVideoId}`;
+  }
   return video.sourceKey ?? normalizeUrl(video.url);
 }
 
@@ -50,6 +58,14 @@ function matchingDetectedVideo(
       ([, existing]) => existing.sourceKey === video.sourceKey,
     );
     if (sourceMatch) return sourceMatch;
+  }
+  if (video.format === VideoFormat.DIRECT && video.pageVideoId) {
+    const elementMatch = Object.entries(detectedVideos).find(
+      ([, existing]) =>
+        existing.format === VideoFormat.DIRECT &&
+        existing.pageVideoId === video.pageVideoId,
+    );
+    if (elementMatch) return elementMatch;
   }
   const aliases = detectedVideoAliases(video);
   return Object.entries(detectedVideos).find(([, existing]) =>
@@ -142,6 +158,20 @@ function removeDetectedVideo(url: string): void {
   }
 }
 
+function removeRecycledVideoAssets(event: Event): void {
+  if (!(event.target instanceof HTMLVideoElement)) return;
+  const pageVideoId = playbackRegistry.register(event.target);
+  const stale = Object.values(detectedVideos)
+    .filter((video) => video.pageVideoId === pageVideoId)
+    .map((video) => video.url);
+  stale.forEach(removeDetectedVideo);
+}
+
+// Infinite feeds commonly reuse one <video> node for a different post. Drop
+// the old asset family when the player is emptied so qualities from two clips
+// cannot be ranked together.
+document.addEventListener("emptied", removeRecycledVideoAssets, true);
+
 /**
  * Add or update detected video and notify popup
  * Uses normalized URL as unique key to prevent duplicates
@@ -153,8 +183,13 @@ function addDetectedVideo(video: VideoMetadata) {
   }
 
   video.pageVideoId ??= playbackRegistry.findPageVideoId(video.sourceUrl ?? video.url);
+  if (video.format === VideoFormat.DIRECT) {
+    Object.assign(video, applyBestDirectMediaAsset(video, [
+      directMediaAssetFromMetadata(video),
+    ]));
+  }
   const matched = matchingDetectedVideo(video);
-  const key = video.sourceKey ?? matched?.[1].sourceKey ?? normalizeUrl(video.url);
+  const key = detectedVideoKey(video);
   const existing = matched?.[1];
 
   logger.debug("[Media Sniper] detected media", redactSensitiveUrl(video.url));
@@ -166,12 +201,28 @@ function addDetectedVideo(video: VideoMetadata) {
 
   if (existing) {
     let updated = false;
+    const groupedDirect =
+      existing.format === VideoFormat.DIRECT &&
+      video.format === VideoFormat.DIRECT &&
+      Boolean(existing.pageVideoId && existing.pageVideoId === video.pageVideoId);
     if (matched[0] !== key) {
       delete detectedVideos[matched[0]];
       detectedVideos[key] = existing;
       sentToPopup.delete(matched[0]);
       sentToPopup.add(key);
       updated = true;
+    }
+
+    if (groupedDirect) {
+      const previousUrl = existing.url;
+      const previousAssets = JSON.stringify(existing.mediaAssets ?? []);
+      const mergedAssets = mergeDirectMediaAssets(
+        existing.mediaAssets,
+        video.mediaAssets,
+        [directMediaAssetFromMetadata(existing), directMediaAssetFromMetadata(video)],
+      );
+      Object.assign(existing, applyBestDirectMediaAsset(existing, mergedAssets));
+      updated = previousUrl !== existing.url || previousAssets !== JSON.stringify(mergedAssets);
     }
     logger.debug("[Media Sniper] Updating detected media metadata", {
       sourceKey: key,
@@ -209,6 +260,7 @@ function addDetectedVideo(video: VideoMetadata) {
     }
 
     if (
+      !groupedDirect &&
       video.url !== existing.url &&
       !video.url.startsWith("blob:") &&
       !video.url.startsWith("data:") &&
@@ -219,7 +271,7 @@ function addDetectedVideo(video: VideoMetadata) {
       updated = true;
     }
 
-    if ((video.observedAt ?? 0) >= (existing.observedAt ?? 0)) {
+    if (!groupedDirect && (video.observedAt ?? 0) >= (existing.observedAt ?? 0)) {
       existing.observedAt = video.observedAt ?? existing.observedAt;
       existing.sourceUrl = video.sourceUrl ?? existing.sourceUrl;
       existing.redirectChain = video.redirectChain ?? existing.redirectChain;
@@ -290,6 +342,7 @@ async function init() {
     },
     detectionCacheSize: config?.advanced?.detectionCacheSize,
     masterPlaylistCacheSize: config?.advanced?.masterPlaylistCacheSize,
+    getPageVideoId: (video) => playbackRegistry.register(video),
   });
 
   // Initialize all detection mechanisms
@@ -327,6 +380,7 @@ function cleanupClipOverlay(event: PageTransitionEvent): void {
   if (event.persisted) return;
   clipOverlay.destroy();
   chrome.storage.onChanged.removeListener(handleClipOverlaySettingsChange);
+  document.removeEventListener("emptied", removeRecycledVideoAssets, true);
   window.removeEventListener("pagehide", cleanupClipOverlay);
 }
 

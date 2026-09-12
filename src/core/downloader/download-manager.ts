@@ -21,10 +21,17 @@ import { generateDownloadId } from "../utils/id-utils";
 import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
+import { SelfContainedFmp4DownloadHandler } from "./direct/self-contained-fmp4-download-handler";
 import { HlsDownloadHandler } from "./hls/hls-download-handler";
 import { M3u8DownloadHandler } from "./m3u8/m3u8-download-handler";
 import { DashDownloadHandler } from "./dash/dash-download-handler";
 import { DEFAULT_MAX_CONCURRENT, DEFAULT_FFMPEG_TIMEOUT_MS } from "../../shared/constants";
+import {
+  applyBestDirectMediaAsset,
+  applySelectedDirectMediaAsset,
+  mergeDirectMediaAssets,
+  selectBestDirectMediaAsset,
+} from "../media/direct-media-assets";
 
 /**
  * Configuration options for the DownloadManager
@@ -75,6 +82,7 @@ export class DownloadManager {
   private readonly maxConcurrent: number;
   private readonly onProgress?: DownloadProgressCallback;
   private readonly directDownloadHandler: DirectDownloadHandler;
+  private readonly selfContainedFmp4DownloadHandler: SelfContainedFmp4DownloadHandler;
   private readonly hlsDownloadHandler: HlsDownloadHandler;
   private readonly m3u8DownloadHandler: M3u8DownloadHandler;
   private readonly dashDownloadHandler: DashDownloadHandler;
@@ -106,6 +114,11 @@ export class DownloadManager {
     // Initialize direct download handler
     this.directDownloadHandler = new DirectDownloadHandler({
       onProgress: this.onProgress,
+    });
+    this.selfContainedFmp4DownloadHandler = new SelfContainedFmp4DownloadHandler({
+      onProgress: this.onProgress,
+      ffmpegTimeout,
+      maxRetries: options.maxRetries,
     });
 
     // Initialize HLS download handler
@@ -141,6 +154,11 @@ export class DownloadManager {
     abortSignal?: AbortSignal,
     downloadIdOverride?: string,
   ): Promise<DownloadState> {
+    if (metadata.format === VideoFormat.DIRECT) {
+      const selectedAsset = selectBestDirectMediaAsset(metadata);
+      metadata = applyBestDirectMediaAsset(metadata, [selectedAsset]);
+      url = selectedAsset.url;
+    }
     const downloadId = downloadIdOverride ?? generateDownloadId(url);
     const operation: MediaOperation = {
       kind: "download",
@@ -198,15 +216,51 @@ export class DownloadManager {
 
       // Route to appropriate download handler based on format
       if (format === VideoFormat.DIRECT) {
-        // Use direct download handler with Chrome downloads API
-        // AbortSignal is used to cancel the HEAD request for extension detection
-        // The actual Chrome download is cancelled via chrome.downloads.cancel
-        await this.directDownloadHandler.download(
-          actualVideoUrl,
-          filename,
-          state.id,
-          abortSignal,
-        );
+        const assets = mergeDirectMediaAssets(metadata.mediaAssets, [
+          selectBestDirectMediaAsset(metadata),
+        ]);
+        let lastError: unknown;
+        for (let index = 0; index < assets.length; index += 1) {
+          const asset = assets[index]!;
+          const attemptMetadata = applySelectedDirectMediaAsset(metadata, asset, assets);
+          const attemptState = await getDownload(state.id);
+          if (attemptState) {
+            attemptState.url = asset.url;
+            attemptState.metadata = attemptMetadata;
+            attemptState.progress.stage = DownloadStage.DOWNLOADING;
+            attemptState.progress.message = index === 0
+              ? `Downloading ${asset.kind === "self-contained-fmp4" ? "complete fMP4" : "direct video"}`
+              : `Trying fallback quality ${index + 1} of ${assets.length}`;
+            await storeDownload(attemptState);
+            this.notifyProgress(attemptState);
+          }
+          try {
+            if (asset.kind === "self-contained-fmp4") {
+              await this.selfContainedFmp4DownloadHandler.download(
+                asset.url,
+                filename,
+                state.id,
+                attemptMetadata,
+                abortSignal ?? new AbortController().signal,
+              );
+            } else {
+              // Ordinary progressive downloads stay on the native Chrome path.
+              await this.directDownloadHandler.download(
+                asset.url,
+                filename,
+                state.id,
+                abortSignal,
+              );
+            }
+            lastError = undefined;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (abortSignal?.aborted) throw error;
+            logger.warn(`Direct asset ${index + 1} of ${assets.length} failed`, error);
+          }
+        }
+        if (lastError) throw lastError;
       } else if (format === VideoFormat.HLS) {
         // Use HLS download handler
         await this.hlsDownloadHandler.download(

@@ -243,6 +243,29 @@ interface ProcessResult {
   warning?: string;
 }
 
+async function createMediaBlobFromChunks(
+  payload: Record<string, unknown>,
+): Promise<ProcessResult> {
+  const downloadId = payload.downloadId as string;
+  const chunkCount = payload.chunkCount as number;
+  const mimeType = typeof payload.mimeType === "string"
+    ? payload.mimeType
+    : "application/octet-stream";
+  validateDownloadId(downloadId);
+  if (!Number.isSafeInteger(chunkCount) || chunkCount <= 0) {
+    throw new Error("A positive media chunk count is required");
+  }
+
+  const chunkMap = await readChunkRange(downloadId, 0, chunkCount);
+  const parts: BlobPart[] = [];
+  for (let index = 0; index < chunkCount; index += 1) {
+    const chunk = chunkMap.get(index);
+    if (!chunk) throw new Error(`Missing downloaded media chunk ${index}`);
+    parts.push(chunk.slice().buffer as ArrayBuffer);
+  }
+  return { blobUrl: URL.createObjectURL(new Blob(parts, { type: mimeType })) };
+}
+
 async function processHLSChunks(
   downloadId: string,
   videoLength: number,
@@ -1076,6 +1099,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ acknowledged: true });
     return false;
   }
+
+  if (
+    handleProcessingMessage(
+      message,
+      sendResponse,
+      MessageType.OFFSCREEN_CREATE_MEDIA_BLOB,
+      MessageType.OFFSCREEN_CREATE_MEDIA_BLOB_RESPONSE,
+      (payload) => createMediaBlobFromChunks(payload),
+    )
+  )
+    return true;
 
   if (
     handleProcessingMessage(

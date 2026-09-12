@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### New Features
+
+- Detect self-contained fragmented MP4 `.m4s` clips from network responses and same-file HLS byte-range playlists without site-specific rules.
+- Associate direct quality variants with the active page player and automatically select the best known complete `.m4s` or progressive asset.
+- Fetch complete `.m4s` resources with credentials, reconstruct range-only responses in byte order, validate `ftyp`/`moov`/`moof`/`mdat`, and save them as playable `.mp4` files without remuxing.
+
 ## [1.12.0] - 2026-08-15
 
 ### New Features

@@ -1,5 +1,10 @@
-import type { VideoMetadata } from "../core/types";
+import { VideoFormat, type VideoMetadata } from "../core/types";
 import { normalizeUrl } from "../core/utils/url-utils";
+import {
+  applyBestDirectMediaAsset,
+  directMediaAssetFromMetadata,
+  mergeDirectMediaAssets,
+} from "../core/media/direct-media-assets";
 
 type DetectedVideos = Record<string, VideoMetadata>;
 
@@ -61,6 +66,18 @@ function aliasEntry(
     [...aliases(video)].some((alias) => observationAliases.has(alias)));
 }
 
+function pageVideoEntry(
+  videos: DetectedVideos,
+  observation: VideoMetadata,
+): [string, VideoMetadata] | undefined {
+  if (observation.format !== VideoFormat.DIRECT || !observation.pageVideoId) {
+    return undefined;
+  }
+  return Object.entries(videos).find(([, video]) =>
+    video.format === VideoFormat.DIRECT &&
+    video.pageVideoId === observation.pageVideoId);
+}
+
 function observationIsCurrent(
   existing: VideoMetadata,
   observation: VideoMetadata,
@@ -93,6 +110,7 @@ export function upsertDetectedVideo(
   }
 
   const matched = sourceEntry(videos, observation.sourceKey)
+    ?? pageVideoEntry(videos, observation)
     ?? (videos[actionableKey] ? [actionableKey, videos[actionableKey]] : undefined)
     ?? aliasEntry(videos, observation);
   if (!matched) {
@@ -107,16 +125,29 @@ export function upsertDetectedVideo(
 
   // The latest transport data is authoritative, while absent metadata is
   // retained from earlier (often richer DOM) observations.
-  const merged = { ...existing, ...observation };
+  let merged = { ...existing, ...observation };
   enrichMissingMetadata(merged, existing);
+  if (
+    existing.format === VideoFormat.DIRECT &&
+    observation.format === VideoFormat.DIRECT
+  ) {
+    const assets = mergeDirectMediaAssets(
+      existing.mediaAssets,
+      observation.mediaAssets,
+      [directMediaAssetFromMetadata(existing), directMediaAssetFromMetadata(observation)],
+    );
+    merged = applyBestDirectMediaAsset(merged, assets);
+  }
 
-  const keyChanged = existingKey !== actionableKey;
+  const mergedKey = normalizeUrl(merged.url);
+
+  const keyChanged = existingKey !== mergedKey;
   const valueChanged = Object.keys(merged).some((key) =>
     merged[key as keyof VideoMetadata] !== existing[key as keyof VideoMetadata]);
   if (!keyChanged && !valueChanged) return false;
 
   if (keyChanged) delete videos[existingKey];
-  videos[actionableKey] = merged;
+  videos[mergedKey] = merged;
   return true;
 }
 

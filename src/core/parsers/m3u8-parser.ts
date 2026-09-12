@@ -12,7 +12,7 @@ import type {
   TimedParsedSegment,
 } from "./playlist-utils";
 import type { ByteRangeSpec } from "../clipping/types";
-import { normalizeUrl } from "../utils/url-utils";
+import { hasM4sMediaHint, normalizeUrl } from "../utils/url-utils";
 import { logger } from "../utils/logger";
 
 export { parseLevelsPlaylist } from "./playlist-utils";
@@ -135,6 +135,52 @@ export function parseMediaPlaylist(
   baseUrl: string,
 ): ParsedPlaylist {
   return parseTimedMediaPlaylist(playlistText, baseUrl);
+}
+
+export interface SingleFileFmp4Playlist {
+  url: string;
+  totalLength: number;
+  initRange: ByteRangeSpec;
+  mediaRanges: ByteRangeSpec[];
+}
+
+/**
+ * Recognize VOD playlists whose init and every media byte range address one
+ * contiguous .m4s resource. Such a resource is already a complete fMP4 and
+ * should use the direct-file download path instead of segment concatenation.
+ */
+export function parseSingleFileFmp4Playlist(
+  playlistText: string,
+  baseUrl: string,
+): SingleFileFmp4Playlist | null {
+  const playlist = parseTimedMediaPlaylist(playlistText, baseUrl);
+  if (!playlist.endList || playlist.segments.length === 0) return null;
+
+  const first = playlist.segments[0]!;
+  if (!first.init?.uri || !first.init.byteRange || !first.byteRange) return null;
+  const mediaUrl = normalizeUrl(first.init.uri);
+  if (!hasM4sMediaHint(mediaUrl) || first.init.byteRange.offset !== 0) return null;
+
+  const mediaRanges: ByteRangeSpec[] = [];
+  let nextOffset = first.init.byteRange.length;
+  for (const segment of playlist.segments) {
+    if (
+      !segment.init?.uri ||
+      normalizeUrl(segment.init.uri) !== mediaUrl ||
+      normalizeUrl(segment.uri) !== mediaUrl ||
+      !segment.byteRange ||
+      segment.byteRange.offset !== nextOffset
+    ) return null;
+    mediaRanges.push(segment.byteRange);
+    nextOffset += segment.byteRange.length;
+  }
+
+  return {
+    url: first.init.uri,
+    totalLength: nextOffset,
+    initRange: first.init.byteRange,
+    mediaRanges,
+  };
 }
 
 /**
@@ -336,6 +382,7 @@ export const M3u8Parser = {
   parseLevelsPlaylist,
   parseMediaPlaylist,
   parseTimedMediaPlaylist,
+  parseSingleFileFmp4Playlist,
   parseMasterPlaylist,
   parseHlsMasterDescriptor,
   selectHlsClipVariant,
