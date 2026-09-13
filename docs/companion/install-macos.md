@@ -27,29 +27,27 @@ Apple developer account to build or use this development distribution, but
 macOS may show a trust warning. The GitHub release notes must describe this
 status accurately.
 
-### Optional Pixi launcher
+### Install with Pixi
 
-The release also provides `.conda` installer packages. When
-`media-sniper-installer` is published on the `gjennings` Anaconda channel, Pixi
-can launch the same installer:
+Version 1.13.0 is also published for both Mac architectures on the
+[`gjennings` Anaconda channel](https://anaconda.org/gjennings/media-sniper-installer).
+If you have Pixi installed, this command launches the same graphical installer:
 
 ```bash
 pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer
 ```
 
-If the package is unavailable, install from the GitHub disk image above.
 Pixi is only an installer transport and is not required at runtime.
 
 ## Update
 
-Download the newer disk image from GitHub and run its installer to update.
-The automatic update checker currently reads the Anaconda channel, so GitHub
-releases appear there only after their Conda packages have also been published.
-It checks at most once per day. When it finds an update, the popup shows
+The automatic update checker reads the Anaconda channel and recognizes the
+published 1.13.0 installer on both Mac architectures. It checks at most once
+per day. When it finds a newer version, the popup shows
 **Media Sniper update available**.
 
-1. Run the newer disk image's installer, or choose **Copy update command** and
-   run the copied Pixi command when that release is available on Anaconda.
+1. Choose **Copy update command** and run the copied Pixi command, or run the
+   newer disk image's installer from GitHub.
 2. Complete the graphical installer. It preserves history, downloads, output
    receipts, settings, and the previous healthy tool release.
 3. Return to Media Sniper and choose **Check installation**. Media Sniper

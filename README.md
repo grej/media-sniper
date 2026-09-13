@@ -178,10 +178,10 @@ target. See the [graphical installation guide](docs/companion/install-macos.md),
 retains the browser-native feature set and contains no companion code,
 permissions, or user interface.
 
-Users install or update the companion from the GitHub disk images without
-cloning this repository. A Pixi installer package is also built for each Mac
-architecture. Once the package is available on the `gjennings` Anaconda channel,
-the equivalent command is:
+Users install or update the companion without cloning this repository.
+The installer is published for Apple Silicon and Intel Macs on the
+[`gjennings` Anaconda channel](https://anaconda.org/gjennings/media-sniper-installer).
+Launch it with:
 
 ```bash
 pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer
@@ -189,7 +189,7 @@ pixi exec --force-reinstall --channel gjennings --channel conda-forge media-snip
 
 Pixi only launches the verified graphical installer. Media Sniper then uses
 project-private, versioned tools and never replaces a user's existing yt-dlp.
-If Pixi cannot find `media-sniper-installer`, use the GitHub disk image.
+The GitHub disk images provide the same installer as a direct download.
 
 ## Usage
 

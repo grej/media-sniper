@@ -13,8 +13,11 @@ attached to a public, stable GitHub release.
 4. Confirm the job succeeds and both `osx-arm64` and `osx-64` packages appear
    with the `main` label on Anaconda.org.
 
-Publishing a GitHub release also triggers this workflow. If assets are attached
-after publication, dispatch it manually once all four Conda files are present.
+Publishing a GitHub release directly also triggers this workflow. Releases
+created by another workflow using `GITHUB_TOKEN` require manual dispatch,
+because GitHub does not forward those release events to other workflows.
+If assets are attached after publication, dispatch it manually once all four
+Conda files are present.
 
 Before upload, the workflow checks the local SHA-256 sidecars, GitHub's asset
 digests, package identity, version, architecture, and absence of runtime

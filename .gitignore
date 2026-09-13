@@ -14,5 +14,4 @@ companion/target/
 
 .build/
 .pixi/
-.python-version.local
 __pycache__/

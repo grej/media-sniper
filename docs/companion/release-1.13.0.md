@@ -11,11 +11,17 @@ checksums, signed tool metadata, and corresponding media-tool source archives.
 The disk images contain real portable executables and are ad-hoc signed
 development distributions. They are not Developer ID signed or Apple notarized.
 
-The GitHub disk image is the available install route. Uploading the identical
-tested Conda files to `gjennings` requires an Anaconda API credential; the
-release-time upload reported that no API key was provided or found in Keychain.
-The automatic update checker currently uses Anaconda, so use GitHub downloads
-until the channel is populated.
+After the initial GitHub publication, both tested Conda packages were published
+to `gjennings/media-sniper-installer` with the `main` label. The
+[publishing workflow](https://github.com/grej/media-sniper/actions/runs/34731901025)
+verified GitHub asset digests, uploaded the unchanged packages to `candidate`,
+verified Anaconda's public hashes, and promoted the exact files to `main`.
+Pixi successfully resolved and retrieved both architectures from the public
+channel; their launcher, disk image, version, and platform markers were checked
+without launching the installer or changing the active application.
+The live metadata passes the extension's update parser for both architectures:
+version 1.12.0 sees the update and version 1.13.0 remains current.
+See [Conda publishing](publishing-conda.md) for future releases and token rotation.
 
 ## Managed tools
 
