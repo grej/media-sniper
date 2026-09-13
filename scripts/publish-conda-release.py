@@ -86,7 +86,7 @@ def wait_for_files(packages, version, labels, latest=False):
     raise RuntimeError(f"Published files or latest-version metadata are not ready for {version}")
 
 
-def refresh_latest_version(metadata, version, token):
+def refresh_latest_version(metadata, packages, version, token):
     # Label promotion can leave Anaconda's public latest_version at the old
     # release. Only advance it after both exact files are verified on main.
     stable = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -97,13 +97,16 @@ def refresh_latest_version(metadata, version, token):
                 and re.fullmatch(stable, file["version"])}
     require(versions and max(versions, key=lambda value: tuple(map(int, value.split(".")))) == version,
             "Refusing to replace a newer public release with this version")
-    # This is the official client's update_package public_attrs API. Keep all
-    # other package attributes and every uploaded file unchanged.
-    request = Request(f"{API}/package/{OWNER}/{PACKAGE}", method="PATCH",
-                      data=json.dumps({"public_attrs": {"latest_version": version}}).encode(),
-                      headers={"Content-Type": "application/json", "Authorization": f"token {token}"})
-    with urlopen(request, timeout=45) as response:
-        require(response.status == 200, "Anaconda did not confirm the metadata update")
+    # Use the official client's package-copy API for the exact verified files.
+    # No replacement or force option is sent, and both labels are preserved.
+    for package in packages:
+        existing_file(metadata, package, version)
+        request = Request(f"{API}/copy/package/{OWNER}/{PACKAGE}/{version}/{package['basename']}",
+                          method="POST", data=json.dumps({"to_owner": OWNER,
+                          "from_channel": "candidate", "to_channel": "main"}).encode(),
+                          headers={"Content-Type": "application/json", "Authorization": f"token {token}"})
+        with urlopen(request, timeout=45) as response:
+            require(response.status == 200, "Anaconda did not confirm package promotion")
 
 
 def add_main_label(package, version, token):
@@ -155,7 +158,7 @@ def main():
         print(f"Promoted both verified {version} installers to main", flush=True)
         metadata = wait_for_files(packages, version, {"main"})
         if metadata.get("latest_version") != version:
-            refresh_latest_version(metadata, version, token)
+            refresh_latest_version(metadata, packages, version, token)
 
     wait_for_files(packages, version, {"main"}, latest=True)
     print(f"Public Anaconda metadata confirms {version} on both Mac architectures", flush=True)
