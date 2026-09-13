@@ -1,0 +1,46 @@
+name: Publish Conda installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published GitHub release containing both tested Mac packages
+        required: true
+        default: v1.13.0
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-conda-installers
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'grej/media-sniper'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          pixi-version: v0.65.0
+          run-install: false
+          global-environments: rattler-build=0.61.2
+      - name: Download and verify the published packages
+        run: python3 scripts/publish-conda-release.py prepare "$RELEASE_TAG" "$RUNNER_TEMP/media-sniper-conda"
+      - name: Publish candidate files and promote verified files to main
+        env:
+          ANACONDA_API_KEY: ${{ secrets.ANACONDA_TOKEN }}
+        run: python3 scripts/publish-conda-release.py publish "$RELEASE_TAG" "$RUNNER_TEMP/media-sniper-conda"
+      - name: Verify public channel metadata
+        run: python3 scripts/publish-conda-release.py check "$RELEASE_TAG" "$RUNNER_TEMP/media-sniper-conda"
