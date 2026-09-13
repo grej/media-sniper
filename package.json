@@ -1,6 +1,6 @@
 {
   "name": "media-sniper-extension",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "type": "module",
   "description": "Browser extension for detecting, downloading, recording, and clipping HLS, DASH, and direct video",
   "scripts": {

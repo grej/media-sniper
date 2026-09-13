@@ -6,8 +6,8 @@ the extension refuses an unlisted or unhealthy combination.
 
 | Component | Supported release |
 | --- | --- |
-| Companion extension | 1.13.1; stable ID `dioapemglpdpmfmoekckbpenmpdgkofp` <!-- x-release-please-version --> |
-| Native host | 1.13.1 on macos arm64 and x86_64 <!-- x-release-please-version --> |
+| Companion extension | 1.14.0; stable ID `dioapemglpdpmfmoekckbpenmpdgkofp` <!-- x-release-please-version --> |
+| Native host | 1.14.0 on macos arm64 and x86_64 <!-- x-release-please-version --> |
 | Native protocol | 1 |
 | Brave Stable | Acceptance baseline 150.1.92.139 or newer compatible Stable release |
 | Chrome Stable | Acceptance baseline 151.0.7922.138 or newer compatible Stable release |

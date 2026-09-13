@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "extension": {
-    "standardVersion": "1.13.1",
-    "companionVersion": "1.13.1",
+    "standardVersion": "1.14.0",
+    "companionVersion": "1.14.0",
     "companionExtensionId": "dioapemglpdpmfmoekckbpenmpdgkofp"
   },
   "nativeHost": {
     "name": "com.grej.media_sniper",
-    "companionVersion": "1.13.1",
+    "companionVersion": "1.14.0",
     "protocolVersion": 1,
     "platform": "macos",
     "architectures": [

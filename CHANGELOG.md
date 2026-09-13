@@ -1,5 +1,82 @@
 # Changelog
 
+## [1.14.0](https://github.com/grej/media-sniper/compare/v1.13.1...v1.14.0) (2026-09-13)
+
+
+### 🎉 New Features
+
+* add copy URL button to detected video cards + remove mediabunny refs ([0dad966](https://github.com/grej/media-sniper/commit/0dad9663d15ca8a0d9c5a83df9a7649912a66257))
+* add HLS quality selection button and functionality in video popup ([#12](https://github.com/grej/media-sniper/issues/12)) ([0b21827](https://github.com/grej/media-sniper/commit/0b218271caf833de0d6b79e063e25b0ff370caa6))
+* add MPEG-DASH support with type refactoring ([#32](https://github.com/grej/media-sniper/issues/32)) ([f5a24ff](https://github.com/grej/media-sniper/commit/f5a24ffd96362607530e081b63a29990ec6e5c0f))
+* add secure native media companion ([34496bf](https://github.com/grej/media-sniper/commit/34496bf91a83239018d8262e9c93137042562774))
+* **branding:** add Media Sniper browser icons ([ab77b14](https://github.com/grej/media-sniper/commit/ab77b1486f75ce105617c47f197d0b1dfe356fbc))
+* bumping up license ([c9cbd2a](https://github.com/grej/media-sniper/commit/c9cbd2a62fc2c1e63376ac1569aad5c43955a74f))
+* change accent color from green to blue to match extension icon ([db62dee](https://github.com/grej/media-sniper/commit/db62deea66028203a76a881b1be7a8d411f18bc8))
+* **clipping:** add clock and seconds time display ([53e1aec](https://github.com/grej/media-sniper/commit/53e1aecba13ab27008d7dc9cb4aaa01076d6134d))
+* **clipping:** add M1 domain model and operation persistence ([43fbc70](https://github.com/grej/media-sniper/commit/43fbc7054d9d6853ab4c008d3ab873f3ca535567))
+* **clipping:** add M2 playback registry and clip editor ([7835014](https://github.com/grej/media-sniper/commit/783501418338f70f5c25b2d93e083e75aa920939))
+* **clipping:** add M3 timed HLS segment planning ([a65faf0](https://github.com/grej/media-sniper/commit/a65faf02466a7318124e450796805a46b27e2277))
+* **clipping:** add M4 HLS fast clips ([5e0daa2](https://github.com/grej/media-sniper/commit/5e0daa2b576635e5ec46d77d5af2875196dc49cd))
+* **clipping:** add M5 DASH fast clips ([b148c5b](https://github.com/grej/media-sniper/commit/b148c5b33b81a9cf669b483075c21a89f7d0a5f0))
+* **clipping:** add M6 direct media clips ([5f3e16f](https://github.com/grej/media-sniper/commit/5f3e16fec80cec95e85e1b16e159686e331dcb2e))
+* **clipping:** add M7 exact segmented clips ([07fef12](https://github.com/grej/media-sniper/commit/07fef120ebf33c495552e163a17be37027c32926))
+* **clipping:** complete M8 Media Sniper release ([500e451](https://github.com/grej/media-sniper/commit/500e4518e68aeb9b7af5abf4677e936676dfe06b))
+* **clipping:** establish M0 baseline at 8eb58839d336ff3a0f85ea5292db2f276663e2d6 ([81df4dc](https://github.com/grej/media-sniper/commit/81df4dc2f088b10fcae6bb2464dc1f3f1bd5f4d9))
+* cloud upload — Google Drive & S3 ([#36](https://github.com/grej/media-sniper/issues/36)) ([04f15f3](https://github.com/grej/media-sniper/commit/04f15f35be088e58ea2d5d1a13e1d62039995431))
+* detect and download self-contained fragmented MP4 media ([388d7cf](https://github.com/grej/media-sniper/commit/388d7cfef7fc94b9cc423271e51716b1ab6a5323))
+* drm validation ([#23](https://github.com/grej/media-sniper/issues/23)) ([d8f5acb](https://github.com/grej/media-sniper/commit/d8f5acb2afff013d70739295dc2f0bca650c6ac2))
+* Enable HLS and M3U8 detection, Dark theme ([#2](https://github.com/grej/media-sniper/issues/2)) ([ae8f8b1](https://github.com/grej/media-sniper/commit/ae8f8b11b92bcf8c5cb6fa13292c2f0358a9715b))
+* Enhance README with offscreen document details and project structure ([7ade312](https://github.com/grej/media-sniper/commit/7ade3120634ee1f8233059053469583f3497f116))
+* enhance-ffmpeg: Improve UI response and updates when extension downloads multiple files, open / close ffmpeg isntance on demand ([#30](https://github.com/grej/media-sniper/issues/30)) ([9f2a21e](https://github.com/grej/media-sniper/commit/9f2a21e9d6a11bac03a3766d90025a1c65220a46))
+* finalize companion release path ([701de7a](https://github.com/grej/media-sniper/commit/701de7aa9d0e0f9fa8ddf69d5f27c8d0981ba4f2))
+* HLS videos ([#1](https://github.com/grej/media-sniper/issues/1)) ([dd10ae7](https://github.com/grej/media-sniper/commit/dd10ae75f4c192631dde10d0b8ea0c7b2ff63af2))
+* hls-stream: Enable extension to download live streams in HLS protocol ([#25](https://github.com/grej/media-sniper/issues/25)) ([074cd7b](https://github.com/grej/media-sniper/commit/074cd7beb38d5e9ffd4fb5f4b9bc0e335575d66e))
+* hls-tab: Refactored UI/UX for Manifest view and better bottom bar, Cancel buttom, tweaks ([#16](https://github.com/grej/media-sniper/issues/16)) ([ea6471d](https://github.com/grej/media-sniper/commit/ea6471dec5c703df7358e8296614c50186e4ddc8))
+* iframe-and-UI: iframe detection and UI/UX refactor ([#27](https://github.com/grej/media-sniper/issues/27)) ([9f429c8](https://github.com/grej/media-sniper/commit/9f429c8a0b6fae4988a8d1ec031cf18beefd6f9c))
+* integrate companion workflows in extension ([efdf83a](https://github.com/grej/media-sniper/commit/efdf83a4f2d886e2ef88ccf0f2803786475711d0))
+* release config ([#14](https://github.com/grej/media-sniper/issues/14)) ([d56bb03](https://github.com/grej/media-sniper/commit/d56bb036863de755dd275ed4866245647d331436))
+* release-please: Added Github actions for Releases ([#3](https://github.com/grej/media-sniper/issues/3)) ([a45fb67](https://github.com/grej/media-sniper/commit/a45fb67896bcc8f93b8da9bdbea130f539b8fbd5))
+* route yt-dlp as automatic fallback ([7baca9c](https://github.com/grej/media-sniper/commit/7baca9c1aea8003649839c02e0134f03e4b71eee))
+* save music downloads as tagged MP3 in v1.13.1 ([2db868c](https://github.com/grej/media-sniper/commit/2db868c69020fbeda3f1be2fb3304ceeff26e6c0))
+* **service-worker:** implement keep-alive mechanism to prevent termination during long downloads ([#20](https://github.com/grej/media-sniper/issues/20)) ([bd5d6e7](https://github.com/grej/media-sniper/commit/bd5d6e7d4373c080fb1a376452992b557c777a15))
+* ship 1.13.0 companion installers with portable media tools ([f8400ef](https://github.com/grej/media-sniper/commit/f8400ef177665fb478bb0400a317d278a15ec684))
+* ship combined m4s and yt-dlp companion release 1.13.0 ([0a19235](https://github.com/grej/media-sniper/commit/0a192356f0bd973bcbff63ddbd0266067aee425a))
+* unify companion media controls ([3ef1dcc](https://github.com/grej/media-sniper/commit/3ef1dcc1ea5e9afbe75bde2a977e546ba92cd341))
+* update build-release workflow for release asset handling ([#7](https://github.com/grej/media-sniper/issues/7)) ([4e5af73](https://github.com/grej/media-sniper/commit/4e5af73d9e5a56bf06be775f8dbca55d3b9a8a14))
+
+
+### 🐛 Bug Fixes
+
+* bind companion results to current media ([2ee89fc](https://github.com/grej/media-sniper/commit/2ee89fc0b4f7a6a30bc80b67f41c675e45716807))
+* build: Build conditionally in release-please workflow ([#9](https://github.com/grej/media-sniper/issues/9)) ([390c7e0](https://github.com/grej/media-sniper/commit/390c7e092f10146b874fbeadf4bc24e589e401f2))
+* **detection:** catch tokenized proxied video ([a0ae467](https://github.com/grej/media-sniper/commit/a0ae46779fa7aeb21c635ecfd96dbc56f87f67cf))
+* fixed release please action ([#4](https://github.com/grej/media-sniper/issues/4)) ([63b9583](https://github.com/grej/media-sniper/commit/63b958320720266f401e9803eca5ade7db64b095))
+* harden native companion boundaries ([a890bb0](https://github.com/grej/media-sniper/commit/a890bb0a5a410a874e5bc6e5e60a137a4645d3c8))
+* keep controlled path portable ([ff0e992](https://github.com/grej/media-sniper/commit/ff0e9925751b416e14f21c16400265985c9baa85))
+* make companion recovery graphical and safe ([2df455e](https://github.com/grej/media-sniper/commit/2df455eca45de320ca7c02f2647871a83965c10f))
+* **popup:** stack clip editor controls ([e8e674a](https://github.com/grej/media-sniper/commit/e8e674a99001ec8babf531833e2c5db51f9f6e78))
+* preserve canonical media page handling ([f3a4f47](https://github.com/grej/media-sniper/commit/f3a4f478748ed5f76b8aa74ff13652c8b31836be))
+* register companion in MV3 worker ([feae44b](https://github.com/grej/media-sniper/commit/feae44ba416c4bbc527c5dc373aee2d0c5fb853c))
+* restore media entry after worker restart ([6fe9c37](https://github.com/grej/media-sniper/commit/6fe9c3729a91180bb0792b6a53f4a6496b689635))
+* satisfy current Rust clippy ([c41f73f](https://github.com/grej/media-sniper/commit/c41f73f491cfbf9a31f10d52742170bd965f2bd2))
+* simplify companion sign-in recovery ([3d77f83](https://github.com/grej/media-sniper/commit/3d77f830291e1a1a417f260d853885b95cd9cbf2))
+
+
+### ⚡ Performance Improvements
+
+* **clipping:** reduce proxied range round trips ([e53f171](https://github.com/grej/media-sniper/commit/e53f171a0e714da985b983abafe8bead98983304))
+
+
+### 📚 Documentation
+
+* accept native companion architecture ([456681f](https://github.com/grej/media-sniper/commit/456681f1b28d1855ca2f8357749da32107aa3b55))
+* add companion release finalization plan ([a13e4d9](https://github.com/grej/media-sniper/commit/a13e4d9a4264bba99bfe0fa1050d1d2cd5648214))
+* adjusted changelog ([46e9314](https://github.com/grej/media-sniper/commit/46e9314508548d66c3ef8385198ccb446e17e119))
+* confirm public Pixi installer and update discovery ([73198a3](https://github.com/grej/media-sniper/commit/73198a367174c42b7a4c169a4f3443875c160e92))
+* credit Media Bridge and explain UX refresh ([144551c](https://github.com/grej/media-sniper/commit/144551ceff5d35838bf15e8942b137536aef2ac1))
+* document graphical companion lifecycle ([775688d](https://github.com/grej/media-sniper/commit/775688d91b53306ba850d4f20d232803725f3fb3))
+* update README and CLAUDE.md with accurate architecture and planned features ([94d5efb](https://github.com/grej/media-sniper/commit/94d5efb27c4a6c2f7c38d91994af7b9c57caf624))
+
 ## [1.13.1] - 2026-09-13
 
 ### Audio downloads

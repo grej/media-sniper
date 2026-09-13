@@ -1,15 +1,11 @@
 schema_version: 1
-
 context:
-  version: "1.13.1"
-
+  version: 1.14.0
 package:
   name: media-sniper-installer
   version: ${{ version }}
-
 source:
   path: ../packaging/conda
-
 build:
   number: 0
   script:
@@ -17,17 +13,27 @@ build:
     - test "$(cat "$SRC_DIR/payload/release-version")" = "${{ version }}"
     - test "$(cat "$SRC_DIR/payload/target-subdir")" = "${{ target_platform }}"
     - install -d "$PREFIX/bin" "$PREFIX/share/media-sniper-installer"
-    - install -m 755 "$SRC_DIR/media-sniper-installer" "$PREFIX/bin/media-sniper-installer"
-    - install -m 644 "$SRC_DIR/payload/media-sniper-companion.dmg" "$PREFIX/share/media-sniper-installer/media-sniper-companion.dmg"
-    - install -m 644 "$SRC_DIR/payload/target-subdir" "$PREFIX/share/media-sniper-installer/target-subdir"
-    - install -m 644 "$SRC_DIR/payload/release-version" "$PREFIX/share/media-sniper-installer/release-version"
-    - install -m 644 "$SRC_DIR/payload/payload.json" "$PREFIX/share/media-sniper-installer/payload.json"
-
+    - >-
+      install -m 755 "$SRC_DIR/media-sniper-installer"
+      "$PREFIX/bin/media-sniper-installer"
+    - >-
+      install -m 644 "$SRC_DIR/payload/media-sniper-companion.dmg"
+      "$PREFIX/share/media-sniper-installer/media-sniper-companion.dmg"
+    - >-
+      install -m 644 "$SRC_DIR/payload/target-subdir"
+      "$PREFIX/share/media-sniper-installer/target-subdir"
+    - >-
+      install -m 644 "$SRC_DIR/payload/release-version"
+      "$PREFIX/share/media-sniper-installer/release-version"
+    - >-
+      install -m 644 "$SRC_DIR/payload/payload.json"
+      "$PREFIX/share/media-sniper-installer/payload.json"
 tests:
   - script:
       - test -x "$PREFIX/bin/media-sniper-installer"
-      - test -f "$PREFIX/share/media-sniper-installer/media-sniper-companion.dmg"
-
+      - >-
+        test -f
+        "$PREFIX/share/media-sniper-installer/media-sniper-companion.dmg"
 about:
   homepage: https://github.com/grej/media-sniper
   repository: https://github.com/grej/media-sniper
