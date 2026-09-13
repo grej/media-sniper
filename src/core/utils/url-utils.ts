@@ -21,6 +21,22 @@ export function normalizeUrl(url: string): string {
   }
 }
 
+/** Matches an m4s filename in the path or an encoded/proxied URL value. */
+export function hasM4sMediaHint(url: string): boolean {
+  let candidate = url;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (/\.m4s(?:$|[?#/&=])/i.test(candidate)) return true;
+    try {
+      const decoded = decodeURIComponent(candidate);
+      if (decoded === candidate) break;
+      candidate = decoded;
+    } catch {
+      break;
+    }
+  }
+  return /\.m4s(?:$|[?#/&=])/i.test(candidate);
+}
+
 /**
  * Detect video format from URL
  */
@@ -43,6 +59,13 @@ export function detectFormatFromUrl(url: string): VideoFormat {
   }
 
   const pathnameLower = urlObj.pathname.toLowerCase();
+
+  // A complete single-file fragmented MP4 may retain the segment-oriented
+  // .m4s extension. Structural validation happens in the direct detector and
+  // downloader before it is offered/saved as an MP4.
+  if (hasM4sMediaHint(url)) {
+    return VideoFormat.DIRECT;
+  }
 
   // Check for DASH manifest files (.mpd) on pathname only
   if (pathnameLower.endsWith(".mpd")) {

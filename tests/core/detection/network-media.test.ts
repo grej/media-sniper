@@ -111,7 +111,7 @@ describe("network media response classification", () => {
     }))).toBe(VideoFormat.UNKNOWN);
   });
 
-  it("rejects adaptive-streaming media segments", () => {
+  it("keeps m4s responses as direct candidates for structural validation", () => {
     expect(classifyNetworkMediaResponse(response({
       url: "https://cdn.example/stream/chunk-42.m4s",
       resourceType: "xmlhttprequest",
@@ -120,7 +120,30 @@ describe("network media response classification", () => {
         "content-type": "video/mp4",
         "content-range": "bytes 0-999/1000",
       },
-    }))).toBe(VideoFormat.UNKNOWN);
+    }))).toBe(VideoFormat.DIRECT);
+
+    expect(classifyNetworkMediaResponse(response({
+      url: "https://cdn.example/stream/complete.m4s?token=secret",
+      resourceType: "xmlhttprequest",
+      statusCode: 200,
+      responseHeaders: { "content-type": "video/iso.segment" },
+    }))).toBe(VideoFormat.DIRECT);
+
+    expect(classifyNetworkMediaResponse(response({
+      url: "https://storage.example/opaque?id=42",
+      resourceType: "xmlhttprequest",
+      statusCode: 206,
+      responseHeaders: {
+        "content-type": "video/iso.segment",
+        "content-range": "bytes 0-999/5000",
+      },
+    }), [
+      "https://cdn.example/complete.m4s?token=secret",
+      "https://storage.example/opaque?id=42",
+    ])).toBe(VideoFormat.DIRECT);
+  });
+
+  it("continues to reject ordinary adaptive-streaming fragments", () => {
 
     expect(classifyNetworkMediaResponse(response({
       url: "https://cdn.example/stream/segment-42.ts?token=secret",

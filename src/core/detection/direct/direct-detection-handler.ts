@@ -23,14 +23,23 @@
  * @module DirectDetectionHandler
  */
 
-import { VideoMetadata, VideoFormat } from "../../types";
-import { detectFormatFromUrl, normalizeUrl } from "../../utils/url-utils";
+import { VideoMetadata, VideoFormat, type DirectMediaAsset } from "../../types";
+import {
+  detectFormatFromUrl,
+  hasM4sMediaHint,
+  normalizeUrl,
+} from "../../utils/url-utils";
 import { extractThumbnail } from "../thumbnail-utils";
 import {
   mediaSourceKey,
   redactSensitiveUrl,
   type NetworkMediaObservation,
 } from "../network-media";
+import {
+  applyBestDirectMediaAsset,
+  directMediaAssetFromMetadata,
+  mergeDirectMediaAssets,
+} from "../../media/direct-media-assets";
 
 const DOM_SCAN_DEBOUNCE_MS = 1000;
 const RECENT_NETWORK_CANDIDATE_TTL_MS = 30_000;
@@ -50,6 +59,8 @@ const MEDIA_LIFECYCLE_EVENTS = [
 export interface DirectDetectionHandlerOptions {
   /** Optional callback for detected videos */
   onVideoDetected?: (video: VideoMetadata) => void;
+  /** Resolve the stable playback-registry ID for an associated element. */
+  getPageVideoId?: (video: HTMLVideoElement) => string;
 }
 
 /**
@@ -58,13 +69,21 @@ export interface DirectDetectionHandlerOptions {
  */
 export class DirectDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
+  private getPageVideoId?: (video: HTMLVideoElement) => string;
   private capturedUrls = new Map<HTMLVideoElement, string>();
+  private mediaAssets = new WeakMap<HTMLVideoElement, DirectMediaAsset[]>();
   private observer: MutationObserver | null = null;
   private scanTimeout: ReturnType<typeof setTimeout> | null = null;
   private knownVideos = new WeakSet<HTMLVideoElement>();
   private recentNetworkCandidates: NetworkMediaObservation[] = [];
   private readonly handleMediaLifecycleEvent = (event: Event): void => {
-    if (event.target instanceof HTMLVideoElement) this.scheduleDOMScan();
+    if (event.target instanceof HTMLVideoElement) {
+      if (event.type === "emptied") {
+        this.capturedUrls.delete(event.target);
+        this.mediaAssets.delete(event.target);
+      }
+      this.scheduleDOMScan();
+    }
   };
 
   /**
@@ -73,6 +92,7 @@ export class DirectDetectionHandler {
    */
   constructor(options: DirectDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
+    this.getPageVideoId = options.getPageVideoId;
   }
 
   /**
@@ -89,6 +109,7 @@ export class DirectDetectionHandler {
     }
     this.capturedUrls.clear();
     this.knownVideos = new WeakSet();
+    this.mediaAssets = new WeakMap();
     this.recentNetworkCandidates = [];
     for (const eventName of MEDIA_LIFECYCLE_EVENTS) {
       document.removeEventListener(eventName, this.handleMediaLifecycleEvent, true);
@@ -123,7 +144,23 @@ export class DirectDetectionHandler {
     }
 
     // Extract metadata
-    const metadata = await this.extractMetadata(url, videoElement, observation);
+    let metadata = await this.extractMetadata(url, videoElement, observation);
+
+    // A standalone adaptive segment is not useful. Only surface .m4s network
+    // candidates when they can be bound to a page player; exact same-file HLS
+    // manifests are independently promoted by the HLS detector.
+    if (metadata?.isSelfContainedFmp4 && !videoElement) return null;
+
+    if (metadata && videoElement) {
+      const assets = mergeDirectMediaAssets(
+        this.mediaAssets.get(videoElement),
+        metadata.mediaAssets,
+        [directMediaAssetFromMetadata(metadata)],
+      );
+      this.mediaAssets.set(videoElement, assets);
+      metadata = applyBestDirectMediaAsset(metadata, assets);
+      this.capturedUrls.set(videoElement, metadata.url);
+    }
 
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -335,6 +372,18 @@ export class DirectDetectionHandler {
     const active = videos.filter((video) => !video.paused && !video.ended);
     if (active.length === 1) return active[0];
     if (videos.length === 1) return videos[0];
+    const visible = videos
+      .map((video) => {
+        const rect = video.getBoundingClientRect();
+        const width = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+        const height = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+        return { video, visibleArea: width * height };
+      })
+      .filter(({ visibleArea }) => visibleArea > 0)
+      .sort((left, right) => right.visibleArea - left.visibleArea);
+    if (visible.length === 1 || (visible[0] && visible[0].visibleArea > (visible[1]?.visibleArea ?? 0))) {
+      return visible[0]?.video;
+    }
     return undefined;
   }
 
@@ -347,10 +396,9 @@ export class DirectDetectionHandler {
     const exact = this.recentNetworkCandidates
       .filter((candidate) => this.candidateMatchesVideo(candidate, video));
     if (exact.length === 1) return exact[0];
-    if (document.querySelectorAll("video").length !== 1) return undefined;
-    return this.recentNetworkCandidates.length === 1
-      ? this.recentNetworkCandidates[0]
-      : undefined;
+    const videos = [...document.querySelectorAll<HTMLVideoElement>("video")];
+    if (this.findSoleVideo(videos) !== video) return undefined;
+    return this.recentNetworkCandidates.at(-1);
   }
 
   /**
@@ -443,6 +491,9 @@ export class DirectDetectionHandler {
     observation?: NetworkMediaObservation,
   ): Promise<VideoMetadata | null> {
     const format = observation?.format ?? detectFormatFromUrl(url);
+    const isSelfContainedFmp4 =
+      hasM4sMediaHint(url) ||
+      observation?.redirectChain.some(hasM4sMediaHint) === true;
 
     // Reject unknown formats
     if (format === VideoFormat.UNKNOWN) {
@@ -459,10 +510,14 @@ export class DirectDetectionHandler {
       redirectChain: observation?.redirectChain,
       observedAt: observation?.observedAt,
       contentType: observation?.contentType,
+      contentLength: observation?.contentLength,
+      fileExtension: isSelfContainedFmp4 ? "mp4" : undefined,
+      isSelfContainedFmp4: isSelfContainedFmp4 || undefined,
     };
 
     // Extract metadata from video element if available
     if (videoElement) {
+      metadata.pageVideoId = this.getPageVideoId?.(videoElement);
       metadata.width = videoElement.videoWidth || undefined;
       metadata.height = videoElement.videoHeight || undefined;
       metadata.duration = videoElement.duration || undefined;
@@ -538,6 +593,8 @@ export class DirectDetectionHandler {
         metadata.thumbnail = thumbnail;
       }
     }
+
+    metadata.mediaAssets = [directMediaAssetFromMetadata(metadata)];
 
     return metadata;
   }

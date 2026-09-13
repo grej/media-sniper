@@ -1,5 +1,5 @@
 import { VideoFormat } from "../types";
-import { detectFormatFromUrl } from "../utils/url-utils";
+import { detectFormatFromUrl, hasM4sMediaHint } from "../utils/url-utils";
 
 export interface NetworkRequestEvidence {
   requestId: string;
@@ -43,10 +43,10 @@ interface RedirectChainRecord {
   updatedAt: number;
 }
 
-const VIDEO_FILE_HINT = /\.(?:mp4|m4v|webm|mov|avi|mkv|flv|wmv|ogv|ogg)(?:[^a-z0-9]|$)/i;
-const VIDEO_PATH_SUFFIX = /\.(?:mp4|m4v|webm|mov|avi|mkv|flv|wmv|ogv|ogg)$/i;
+const VIDEO_FILE_HINT = /\.(?:mp4|m4s|m4v|webm|mov|avi|mkv|flv|wmv|ogv|ogg)(?:[^a-z0-9]|$)/i;
+const VIDEO_PATH_SUFFIX = /\.(?:mp4|m4s|m4v|webm|mov|avi|mkv|flv|wmv|ogv|ogg)$/i;
 const IMAGE_PATH_SUFFIX = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
-const SEGMENT_PATH_SUFFIX = /\.(?:m4s|cmf[av]|ts)(?:$|[?#])/i;
+const SEGMENT_PATH_SUFFIX = /\.(?:cmf[av]|ts)(?:$|[?#])/i;
 const SEGMENT_CONTENT_TYPES = new Set(["video/mp2t", "video/iso.segment"]);
 const SENSITIVE_QUERY_KEY = /(?:^|[-_])(?:auth|acc|access|account)?token(?:$|[-_])|(?:^|[-_])(?:sig|signature|expires?|rnd|file)(?:$|[-_])/i;
 
@@ -205,6 +205,24 @@ export function classifyNetworkMediaResponse(
     return VideoFormat.UNKNOWN;
   }
   if (hasTerminalImagePath(evidence.url)) return VideoFormat.UNKNOWN;
+
+  // m4s normally names an adaptive segment, but some short-form players use
+  // one range-addressed m4s as the complete fMP4 (ftyp+moov+moof+mdat). Keep
+  // it as a direct candidate; page-player association limits what is offered,
+  // and the downloader verifies the box layout before saving it as an MP4.
+  if ([evidence.url, ...redirectChain].some(hasM4sMediaHint)) {
+    if (isDocumentOrErrorContentType(contentType)) return VideoFormat.UNKNOWN;
+    if (
+      contentType.startsWith("video/") ||
+      contentType.includes("iso.segment") ||
+      contentType.includes("mp4") ||
+      isGenericBinaryContentType(contentType)
+    ) {
+      return VideoFormat.DIRECT;
+    }
+    return VideoFormat.UNKNOWN;
+  }
+
   if (SEGMENT_PATH_SUFFIX.test(evidence.url)) return VideoFormat.UNKNOWN;
   if (SEGMENT_CONTENT_TYPES.has(contentType)) return VideoFormat.UNKNOWN;
 
@@ -289,6 +307,11 @@ function parseContentLength(value: string | undefined): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+function completeLengthFromContentRange(value: string | undefined): number | undefined {
+  const total = value?.trim().match(/^bytes\s+\d+-\d+\/(\d+)$/i)?.[1];
+  return parseContentLength(total);
+}
+
 export class NetworkMediaRequestTracker {
   private readonly chains = new Map<string, RedirectChainRecord>();
 
@@ -333,7 +356,9 @@ export class NetworkMediaRequestTracker {
       resourceType: evidence.resourceType,
       contentType: normalizedContentType(evidence.responseHeaders) || undefined,
       contentRange: evidence.responseHeaders?.["content-range"],
-      contentLength: parseContentLength(evidence.responseHeaders?.["content-length"]),
+      contentLength:
+        completeLengthFromContentRange(evidence.responseHeaders?.["content-range"]) ??
+        parseContentLength(evidence.responseHeaders?.["content-length"]),
       initiator: evidence.initiator,
       observedAt: evidence.observedAt ?? Date.now(),
     };

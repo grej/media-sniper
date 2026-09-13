@@ -41,6 +41,8 @@ export interface DetectionManagerOptions {
   detectionCacheSize?: number;
   /** Max master playlists held in memory by HLS handler (default: 50) */
   masterPlaylistCacheSize?: number;
+  /** Resolve a stable ID for a video element associated with a request. */
+  getPageVideoId?: (video: HTMLVideoElement) => string;
 }
 
 /**
@@ -63,6 +65,7 @@ export class DetectionManager {
     this.onVideoRemoved = options.onVideoRemoved;
     this.directHandler = new DirectDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
+      getPageVideoId: options.getPageVideoId,
     });
     this.hlsHandler = new HlsDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),

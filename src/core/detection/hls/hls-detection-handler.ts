@@ -25,11 +25,17 @@
  * @module HlsDetectionHandler
  */
 
-import { VideoMetadata, VideoFormat } from "../../types";
+import {
+  VideoMetadata,
+  VideoFormat,
+  type DirectMediaAsset,
+  type Level,
+} from "../../types";
 import {
   isMasterPlaylist,
   isMediaPlaylist,
   parseMasterPlaylist,
+  parseSingleFileFmp4Playlist,
 } from "../../parsers/m3u8-parser";
 import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
@@ -37,6 +43,8 @@ import { logger } from "../../utils/logger";
 import { extractThumbnail } from "../thumbnail-utils";
 import { hasDrm, canDecrypt } from "../../utils/drm-utils";
 import { DEFAULT_DETECTION_CACHE_SIZE, DEFAULT_MASTER_PLAYLIST_CACHE_SIZE } from "../../../shared/constants";
+import { mediaSourceKey } from "../network-media";
+import { applyBestDirectMediaAsset } from "../../media/direct-media-assets";
 
 /** Configuration options for HlsDetectionHandler */
 export interface HlsDetectionHandlerOptions {
@@ -159,6 +167,25 @@ export class HlsDetectionHandler {
     normalizedUrl: string,
     playlistText: string,
   ): Promise<VideoMetadata | null> {
+    const singleFile = this.isPlainMediaPlaylist(playlistText)
+      ? parseSingleFileFmp4Playlist(playlistText, url)
+      : null;
+    if (singleFile) {
+      logger.info("[Media Sniper] Detected single-file fMP4 HLS asset", {
+        playlistUrl: url,
+        mediaUrl: singleFile.url,
+      });
+      return this.addSingleFileFmp4Video(url, [{
+        url: singleFile.url,
+        kind: "self-contained-fmp4",
+        sourceKey: mediaSourceKey([singleFile.url], VideoFormat.DIRECT),
+        sourceUrl: url,
+        observedAt: Date.now(),
+        contentType: "video/mp4",
+        contentLength: singleFile.totalLength,
+      }]);
+    }
+
     const belongsToMaster = this.checkIfBelongsToMasterPlaylist(normalizedUrl);
 
     if (belongsToMaster) {
@@ -200,10 +227,81 @@ export class HlsDetectionHandler {
     // Remove any existing detected videos that are variants of this master playlist
     this.removeVariantVideos(variantUrls);
 
+    const singleFileAssets = await this.findSingleFileVariantAssets(levels);
+    if (singleFileAssets.length > 0) {
+      logger.info(
+        `[Media Sniper] Detected ${singleFileAssets.length} complete fMP4 quality variant(s)`,
+      );
+      return this.addSingleFileFmp4Video(url, singleFileAssets);
+    }
+
     // Determine liveness by fetching the first variant playlist and checking for #EXT-X-ENDLIST
     const isLive = await this.checkMasterIsLive(levels);
 
     return await this.addDetectedVideo(url, VideoFormat.HLS, playlistText, isLive);
+  }
+
+  private async findSingleFileVariantAssets(
+    levels: Level[],
+  ): Promise<DirectMediaAsset[]> {
+    // Preserve the normal HLS mux path when the master declares a separate
+    // audio rendition; a video-only m4s is not a complete fallback.
+    if (levels.some((level) => level.type === "audio")) return [];
+    const streams = levels.filter((level) => level.type === "stream");
+    const results = await Promise.allSettled(streams.map(async (level) => {
+      const text = await this.fetchPlaylistText(level.uri);
+      if (!this.isPlainMediaPlaylist(text)) return null;
+      const singleFile = parseSingleFileFmp4Playlist(text, level.uri);
+      if (!singleFile) return null;
+      return {
+        url: singleFile.url,
+        kind: "self-contained-fmp4" as const,
+        sourceKey: mediaSourceKey([singleFile.url], VideoFormat.DIRECT),
+        sourceUrl: level.uri,
+        observedAt: Date.now(),
+        contentType: "video/mp4",
+        contentLength: singleFile.totalLength,
+        width: level.width,
+        height: level.height,
+        bandwidth: level.bitrate,
+        quality: level.height ? `${level.height}p` : undefined,
+      };
+    }));
+    return results.flatMap((result) =>
+      result.status === "fulfilled" && result.value ? [result.value] : []);
+  }
+
+  private isPlainMediaPlaylist(playlistText: string): boolean {
+    return !hasDrm(playlistText) &&
+      canDecrypt(playlistText) &&
+      !/#EXT-X-KEY:METHOD=(?!NONE(?:,|$))/i.test(playlistText);
+  }
+
+  private async addSingleFileFmp4Video(
+    playlistUrl: string,
+    assets: DirectMediaAsset[],
+  ): Promise<VideoMetadata> {
+    const first = assets[0]!;
+    let metadata: VideoMetadata = {
+      url: first.url,
+      format: VideoFormat.DIRECT,
+      pageUrl: window.location.href,
+      title: document.title,
+      fileExtension: "mp4",
+      sourceUrl: playlistUrl,
+      sourceKey: first.sourceKey,
+      observedAt: first.observedAt,
+      contentType: "video/mp4",
+      contentLength: first.contentLength,
+      isSelfContainedFmp4: true,
+      mediaAssets: assets,
+      isLive: false,
+    };
+    metadata = applyBestDirectMediaAsset(metadata, assets);
+    const thumbnail = extractThumbnail();
+    if (thumbnail) metadata.thumbnail = thumbnail;
+    this.onVideoDetected?.(metadata);
+    return metadata;
   }
 
   /**

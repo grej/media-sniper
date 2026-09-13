@@ -39,7 +39,11 @@ import {
   canCancelDownload,
   CANNOT_CANCEL_MESSAGE,
 } from "./core/utils/download-utils";
-import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
+import {
+  normalizeUrl,
+  detectFormatFromUrl,
+  hasM4sMediaHint,
+} from "./core/utils/url-utils";
 import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
@@ -760,6 +764,41 @@ function recentNetworkMediaForSender(
   ) ?? [];
 }
 
+function hasRecentAdaptiveManifest(
+  tabId: number,
+  frameId: number,
+  documentId: string | undefined,
+  observation: NetworkMediaObservation,
+): boolean {
+  const candidates = recentNetworkMedia.get(
+    networkMediaFrameKey(tabId, frameId, documentId),
+  ) ?? [];
+  const mediaScopes = [observation.url, ...observation.redirectChain]
+    .flatMap((url) => {
+      try {
+        const parsed = new URL(url);
+        return [`${parsed.origin}${parsed.pathname.slice(0, parsed.pathname.lastIndexOf("/") + 1)}`];
+      } catch {
+        return [];
+      }
+    });
+  return candidates.some((candidate) => {
+    if (candidate.format !== VideoFormat.HLS && candidate.format !== VideoFormat.DASH) {
+      return false;
+    }
+    return [candidate.url, ...candidate.redirectChain].some((url) => {
+      try {
+        const parsed = new URL(url);
+        const scope = `${parsed.origin}${parsed.pathname.slice(0, parsed.pathname.lastIndexOf("/") + 1)}`;
+        return mediaScopes.some((mediaScope) =>
+          mediaScope.startsWith(scope) || scope.startsWith(mediaScope));
+      } catch {
+        return false;
+      }
+    });
+  });
+}
+
 chrome.webRequest.onBeforeRequest.addListener((details) => {
   networkMediaTracker.recordRequest({
     requestId: details.requestId,
@@ -807,6 +846,22 @@ chrome.webRequest.onResponseStarted.addListener(
       responseHeaders: responseHeadersToRecord(details.responseHeaders),
     });
     if (!observation || details.tabId < 0) return;
+
+    const isRawM4sCandidate = observation.format === VideoFormat.DIRECT &&
+      [observation.url, ...observation.redirectChain].some(hasM4sMediaHint);
+    if (
+      isRawM4sCandidate &&
+      hasRecentAdaptiveManifest(
+        details.tabId,
+        details.frameId,
+        webRequestDocumentId(details),
+        observation,
+      )
+    ) {
+      // The manifest handlers can distinguish a complete same-file HLS asset
+      // from ordinary HLS/DASH fragments. Avoid surfacing a raw segment card.
+      return;
+    }
 
     rememberNetworkMedia(
       details.tabId,
@@ -1010,6 +1065,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case MessageType.OFFSCREEN_PROCESS_FAST_SEGMENTED_CLIP_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_EXACT_SEGMENTED_CLIP_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_MEDIABUNNY_CLIP_RESPONSE:
+      case MessageType.OFFSCREEN_CREATE_MEDIA_BLOB_RESPONSE:
         // Handled by ffmpeg-bridge's dynamic onMessage listener in processWithFFmpeg()
         return false;
 

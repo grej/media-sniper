@@ -29,6 +29,23 @@ export interface YtDlpMediaSource {
 
 export type MediaSource = BrowserMediaSource | YtDlpMediaSource;
 
+export type DirectMediaAssetKind = "progressive" | "self-contained-fmp4";
+
+/** A complete direct-file candidate associated with one page video. */
+export interface DirectMediaAsset {
+  url: string;
+  kind: DirectMediaAssetKind;
+  sourceKey?: string;
+  sourceUrl?: string;
+  observedAt?: number;
+  contentType?: string;
+  contentLength?: number;
+  width?: number;
+  height?: number;
+  bandwidth?: number;
+  quality?: string;
+}
+
 export interface VideoMetadata {
   url: string;
   title?: string;
@@ -52,6 +69,9 @@ export interface VideoMetadata {
   redirectChain?: string[]; // Observed HTTP redirect aliases, source to transport
   observedAt?: number; // Epoch milliseconds for refreshing short-lived media URLs
   contentType?: string; // Response MIME type captured during network detection
+  contentLength?: number; // Complete resource size when known from Content-Length/Range
+  isSelfContainedFmp4?: boolean; // .m4s containing ftyp+moov followed by moof+mdat
+  mediaAssets?: DirectMediaAsset[]; // Complete direct variants associated with this page video
   /** New records identify their backend explicitly; legacy rows normalize on read. */
   source?: MediaSource;
 }

@@ -172,4 +172,59 @@ describe("DirectDetectionHandler", () => {
     });
     handler.destroy();
   });
+
+  it("binds an m4s candidate to the page video and marks it as a complete-fMP4 download", async () => {
+    const detected: VideoMetadata[] = [];
+    const video = document.createElement("video");
+    document.body.append(video);
+    const observation = directObservation({
+      url: "https://cdn.example/loop-high.m4s?token=secret",
+      entryUrl: "https://cdn.example/loop-high.m4s?token=secret",
+      redirectChain: ["https://cdn.example/loop-high.m4s?token=secret"],
+      sourceKey: "direct:https://cdn.example/loop-high.m4s",
+      resourceType: "xmlhttprequest",
+      contentType: "video/iso.segment",
+      contentLength: 50_000,
+    });
+    const handler = new DirectDetectionHandler({
+      onVideoDetected: (metadata) => detected.push(metadata),
+      getPageVideoId: () => "page-video-1",
+    });
+
+    handler.handleNetworkRequest(observation);
+    await Promise.resolve();
+
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toMatchObject({
+      url: observation.url,
+      format: VideoFormat.DIRECT,
+      fileExtension: "mp4",
+      isSelfContainedFmp4: true,
+      pageVideoId: "page-video-1",
+      contentLength: 50_000,
+    });
+    expect(detected[0]?.mediaAssets).toEqual([
+      expect.objectContaining({
+        url: observation.url,
+        kind: "self-contained-fmp4",
+      }),
+    ]);
+    handler.destroy();
+  });
+
+  it("does not surface an unbound m4s segment as a standalone video", async () => {
+    const onVideoDetected = vi.fn<(metadata: VideoMetadata) => void>();
+    const handler = new DirectDetectionHandler({ onVideoDetected });
+    handler.handleNetworkRequest(directObservation({
+      url: "https://cdn.example/orphan.m4s",
+      entryUrl: "https://cdn.example/orphan.m4s",
+      redirectChain: ["https://cdn.example/orphan.m4s"],
+      sourceKey: "direct:https://cdn.example/orphan.m4s",
+      resourceType: "xmlhttprequest",
+      contentType: "video/iso.segment",
+    }));
+    await Promise.resolve();
+    expect(onVideoDetected).not.toHaveBeenCalled();
+    handler.destroy();
+  });
 });

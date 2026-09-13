@@ -4,6 +4,7 @@ import {
   parseMediaPlaylist,
   parseTimedMediaPlaylist,
   parseHlsMasterDescriptor,
+  parseSingleFileFmp4Playlist,
   selectHlsClipVariant,
 } from "@/core/parsers/m3u8-parser";
 
@@ -140,6 +141,52 @@ after.ts
     expect(
       parsed.segments.map((segment) => segment.discontinuitySequence),
     ).toEqual([7, 8]);
+  });
+});
+
+describe("parseSingleFileFmp4Playlist", () => {
+  it("recognizes one contiguous m4s containing the map and every media range", () => {
+    const result = parseSingleFileFmp4Playlist(playlist(`
+#EXT-X-MAP:URI="loop.m4s",BYTERANGE="24@0"
+#EXTINF:1,
+#EXT-X-BYTERANGE:10@24
+loop.m4s
+#EXTINF:1,
+#EXT-X-BYTERANGE:12
+loop.m4s
+#EXT-X-ENDLIST`), BASE_URL);
+
+    expect(result).toEqual({
+      url: "https://cdn.example/path/loop.m4s",
+      totalLength: 46,
+      initRange: { offset: 0, length: 24 },
+      mediaRanges: [
+        { offset: 24, length: 10 },
+        { offset: 34, length: 12 },
+      ],
+    });
+  });
+
+  it("rejects separate init files, gaps, and live playlists", () => {
+    expect(parseSingleFileFmp4Playlist(playlist(`
+#EXT-X-MAP:URI="init.m4s",BYTERANGE="24@0"
+#EXTINF:1,
+#EXT-X-BYTERANGE:10@24
+media.m4s
+#EXT-X-ENDLIST`), BASE_URL)).toBeNull();
+
+    expect(parseSingleFileFmp4Playlist(playlist(`
+#EXT-X-MAP:URI="loop.m4s",BYTERANGE="24@0"
+#EXTINF:1,
+#EXT-X-BYTERANGE:10@30
+loop.m4s
+#EXT-X-ENDLIST`), BASE_URL)).toBeNull();
+
+    expect(parseSingleFileFmp4Playlist(playlist(`
+#EXT-X-MAP:URI="loop.m4s",BYTERANGE="24@0"
+#EXTINF:1,
+#EXT-X-BYTERANGE:10@24
+loop.m4s`), BASE_URL)).toBeNull();
   });
 });
 

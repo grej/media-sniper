@@ -66,7 +66,7 @@ The main additions and quality-of-life improvements are:
 
 ## Features
 
-- **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), and direct video URLs (`.mp4`, `.webm`, etc.)
+- **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), direct video URLs (`.mp4`, `.webm`, etc.), and self-contained fragmented MP4 (`.m4s`)
 - **Automatic Video Detection**: Detects late-assigned media elements, tokenized progressive video, redirects, and range-backed media proxy responses
 - **In-browser Clipping**: Create timestamped MP4 clips in Fast (keyframe-aligned) or Exact mode without a helper service
 - **Playback Marks**: Capture clip boundaries from a selected page player or enter millisecond-precise timestamps manually
@@ -226,6 +226,7 @@ When a live stream is detected:
 | **M3U8** (`.m3u8` media playlist) | ✅ | ✅ | — | ✅ |
 | **DASH** (`.mpd` manifest) | ✅ | ✅ | ✅ | ✅ |
 | **Direct** (`.mp4`, `.webm`, etc.) | ✅ | ✅ | — | ✅ |
+| **Single-file fMP4** (`.m4s` with embedded init) | ✅ | ✅ | — | — |
 
 ## Technical Details
 
