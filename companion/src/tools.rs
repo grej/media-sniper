@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const RELEASE_PUBLIC_KEY_B64: &str = "QPWXTEbqWGBY7xqwO+TVA1809E28kK0HcDf0QpuWQtM=";
+const RELEASE_PUBLIC_KEY_B64: &str = "44XFJjYK5JVQyBlZvr8IUwu7w7++++pCMOjJQqQhLik=";
 
 #[derive(Debug, Clone)]
 pub struct ToolPaths {

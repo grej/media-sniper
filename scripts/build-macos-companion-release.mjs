@@ -5,12 +5,14 @@ import {
   chmod,
   cp,
   mkdir,
+  mkdtemp,
   readFile,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -80,7 +82,7 @@ function verifyDeveloperIdSignature(path, label) {
   }
 }
 
-async function makeApp({ name, identifier, source, destination, resources }) {
+async function makeApp({ name, identifier, source, destination, resources, target }) {
   const contents = join(destination, "Contents");
   const executableDirectory = join(contents, "MacOS");
   const resourceDirectory = join(contents, "Resources");
@@ -91,6 +93,8 @@ async function makeApp({ name, identifier, source, destination, resources }) {
   const executablePath = join(executableDirectory, executableName);
   run("xcrun", [
     "swiftc",
+    "-target",
+    `${target}-apple-macosx13.0`,
     "-module-cache-path",
     join(projectRoot, ".build", "swift-module-cache"),
     "-O",
@@ -118,6 +122,7 @@ async function makeApp({ name, identifier, source, destination, resources }) {
     NSHighResolutionCapable: true,
   };
   await writeFile(join(contents, "Info.plist"), JSON.stringify(info, null, 2), "utf8");
+  run("plutil", ["-convert", "xml1", join(contents, "Info.plist")]);
   await writeFile(join(contents, "PkgInfo"), "APPL????", "utf8");
   if (resources) await resources(resourceDirectory);
 }
@@ -154,6 +159,7 @@ async function main() {
     await readFile(join(extension, "manifest.json"), "utf8"),
   );
   if (
+    extensionManifest.version !== packageMetadata.version ||
     extensionManifest.key !== COMPANION_MANIFEST_KEY ||
     extensionIdFromManifestKey(extensionManifest.key) !== COMPANION_EXTENSION_ID ||
     !extensionManifest.permissions?.includes("nativeMessaging") ||
@@ -180,11 +186,22 @@ async function main() {
     releaseMetadataSignature: toolReleaseMetadataSignature,
     publicKeyPem,
   });
+  const target = toolReleaseMetadata.target;
+  if (!["arm64", "x86_64"].includes(target) ||
+      toolReleaseMetadata.compatibility?.companionVersion !== packageMetadata.version) {
+    throw new Error("Managed tools must match this release version and a supported Mac architecture");
+  }
+  for (const binary of [host, ...["yt-dlp", "ffmpeg", "ffprobe", "deno"].map(
+    (name) => join(tools, "bin", name),
+  )]) {
+    run("lipo", [binary, "-verify_arch", target]);
+  }
 
   const releaseName = values.development
     ? `media-sniper-companion-macos-${toolReleaseMetadata.target}-development-v${packageMetadata.version}`
     : `media-sniper-companion-macos-${toolReleaseMetadata.target}-v${packageMetadata.version}`;
-  const releaseRoot = join(outputDirectory, `${releaseName}.staging`);
+  // Cloud-synced project directories can reattach Finder metadata during signing.
+  const releaseRoot = await mkdtemp(join(tmpdir(), `${releaseName}-`));
   const diskImagePath = join(outputDirectory, `${releaseName}.dmg`);
   await mkdir(outputDirectory, { recursive: true });
   await rm(releaseRoot, { force: true, recursive: true });
@@ -193,6 +210,7 @@ async function main() {
 
   const installApp = join(releaseRoot, "Install Media Sniper Companion.app");
   await makeApp({
+    target,
     name: "Install Media Sniper Companion",
     identifier: "com.grej.media-sniper.companion-installer",
     source: "installer/macos/InstallMediaSniperCompanion.swift",
@@ -251,6 +269,7 @@ async function main() {
 
   const uninstallApp = join(releaseRoot, "Uninstall Media Sniper Companion.app");
   await makeApp({
+    target,
     name: "Uninstall Media Sniper Companion",
     identifier: "com.grej.media-sniper.companion-uninstaller",
     source: "installer/macos/UninstallMediaSniperCompanion.swift",
@@ -259,6 +278,8 @@ async function main() {
 
   const signIdentity = values.development ? "-" : values["sign-identity"];
   for (const app of [installApp, uninstallApp]) {
+    // Copied source files can carry Finder metadata that invalidates app signing.
+    run("xattr", ["-cr", app]);
     const signingArguments = ["--force"];
     if (!values.development) {
       signingArguments.push("--options", "runtime", "--timestamp");

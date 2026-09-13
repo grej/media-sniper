@@ -341,7 +341,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "media-sniper-companion"
-version = "1.12.0"
+version = "1.13.0"
 dependencies = [
  "base64",
  "ed25519-dalek",

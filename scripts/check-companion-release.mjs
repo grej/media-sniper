@@ -168,6 +168,10 @@ async function main() {
   if (!installerSupport.includes(releasePublicKeyRawBase64)) {
     throw new Error("macOS installer does not pin the managed-tool release key");
   }
+  const nativeTools = await readFile(join(projectRoot, "companion/src/tools.rs"), "utf8");
+  if (!nativeTools.includes(releasePublicKeyRawBase64)) {
+    throw new Error("Native host does not pin the managed-tool release key");
+  }
   await validateBuiltManifests();
   await validateBuiltServiceWorkers();
   await validateHostManifest();

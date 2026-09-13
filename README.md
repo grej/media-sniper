@@ -115,6 +115,16 @@ Google Drive requires you to create your own OAuth credentials (free):
 
 ## Installation
 
+### macOS companion installer (includes yt-dlp)
+
+Download the matching **arm64** (Apple Silicon) or **x86_64** (Intel) disk image
+from the [latest GitHub release](https://github.com/grej/media-sniper/releases/latest).
+Open it and run **Install Media Sniper Companion**, then follow the
+[installation guide](docs/companion/install-macos.md) to load the included extension.
+The installer bundles private copies of yt-dlp, FFmpeg, ffprobe, and Deno;
+no separate media-tool installation is required. The current disk images are
+ad-hoc signed development distributions and are not Apple notarized.
+
 ### Development Build
 
 1. Clone the repository:
@@ -168,7 +178,10 @@ target. See the [graphical installation guide](docs/companion/install-macos.md),
 retains the browser-native feature set and contains no companion code,
 permissions, or user interface.
 
-Users install or update the companion without cloning this repository:
+Users install or update the companion from the GitHub disk images without
+cloning this repository. A Pixi installer package is also built for each Mac
+architecture. Once the package is available on the `gjennings` Anaconda channel,
+the equivalent command is:
 
 ```bash
 pixi exec --force-reinstall --channel gjennings --channel conda-forge media-sniper-installer
@@ -176,6 +189,7 @@ pixi exec --force-reinstall --channel gjennings --channel conda-forge media-snip
 
 Pixi only launches the verified graphical installer. Media Sniper then uses
 project-private, versioned tools and never replaces a user's existing yt-dlp.
+If Pixi cannot find `media-sniper-installer`, use the GitHub disk image.
 
 ## Usage
 
@@ -227,6 +241,12 @@ When a live stream is detected:
 | **DASH** (`.mpd` manifest) | ✅ | ✅ | ✅ | ✅ |
 | **Direct** (`.mp4`, `.webm`, etc.) | ✅ | ✅ | — | ✅ |
 | **Single-file fMP4** (`.m4s` with embedded init) | ✅ | ✅ | — | — |
+
+For multipart `.m4s` streams, use the HLS playlist or DASH manifest so Media
+Sniper can retrieve the initialization segment, order the media fragments,
+and merge audio/video. A lone `.m4s` fragment without its initialization data
+is not a complete video; the extension identifies it rather than saving a
+misleading standalone MP4.
 
 ## Technical Details
 

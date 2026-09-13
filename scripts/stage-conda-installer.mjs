@@ -30,11 +30,14 @@ export async function stageCondaInstaller({ dmg, subdir }) {
   }
   const targetMarker = subdir === "osx-arm64" ? "macos-arm64" : "macos-x86_64";
   if (!filename.includes(targetMarker)) throw new Error(`DMG filename does not match ${subdir}`);
+  const bytes = await readFile(source);
+  if (bytes.length < 512 || bytes.toString("ascii", bytes.length - 512, bytes.length - 508) !== "koly") {
+    throw new Error("Installer payload must be a real UDIF disk image, not a placeholder");
+  }
 
   const payload = join(projectRoot, "packaging/conda/payload");
   await rm(payload, { recursive: true, force: true });
   await mkdir(payload, { recursive: true });
-  const bytes = await readFile(source);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   await copyFile(source, join(payload, "media-sniper-companion.dmg"));
   await copyFile(join(projectRoot, "LICENSE"), join(payload, "LICENSE"));

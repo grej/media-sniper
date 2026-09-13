@@ -1,5 +1,14 @@
 # Managed-tool release key
 
+The first public installer release, 1.13.0, provisions a dedicated signing key
+and replaces the provisional pre-release public key. The publisher retains the
+private key outside the repository in its release-secret directory, with
+owner-only access. Its public SPKI SHA-256 fingerprint is
+`e8000a05608d641bd72b8f679caa4cffc031f91041c468b1c887dfc118f3322f`.
+Future releases must use that retained key or follow the rotation procedure
+below. No previously published managed-tool installer requires migration from
+the provisional key.
+
 Managed-tool manifests and their richer release metadata use Ed25519 detached
 signatures. The public key is intentionally public and pinned in three release
 surfaces: the repository PEM, the native host, and the graphical macOS

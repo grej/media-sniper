@@ -1,12 +1,21 @@
 # Changelog
 
-## Unreleased
+## [1.13.0] - 2026-09-12
 
 ### New Features
 
+- Ship the yt-dlp companion and browser-native `.m4s` improvements together in one macOS installer.
+- Bundle standalone yt-dlp 2026.08.19 with its embedded EJS 0.8.0 solver, Deno 2.6.9, and self-contained FFmpeg/ffprobe 8.0.3 builds for Apple Silicon and Intel.
+- Add automatic page-analysis fallback, shared Download/Clip controls, and installation/update checks for the companion.
 - Detect self-contained fragmented MP4 `.m4s` clips from network responses and same-file HLS byte-range playlists without site-specific rules.
 - Associate direct quality variants with the active page player and automatically select the best known complete `.m4s` or progressive asset.
 - Fetch complete `.m4s` resources with credentials, reconstruct range-only responses in byte order, validate `ftyp`/`moov`/`moof`/`mdat`, and save them as playable `.mp4` files without remuxing.
+
+### Installer reliability
+
+- Reject placeholder disk images and mismatched native architectures before packaging.
+- Compile each graphical installer for its target Mac architecture and verify one release version across components.
+- Provision the first public managed-tool signing identity; the private signing key remains outside source and release artifacts. Development disk images are ad-hoc signed and are not Apple-notarized.
 
 ## [1.12.0] - 2026-08-15
 

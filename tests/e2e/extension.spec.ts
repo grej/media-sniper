@@ -1,5 +1,5 @@
 import { expect, test, chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -134,7 +134,7 @@ test("starts as the unpacked Media Sniper MV3 extension", async () => {
     id: harness.extensionId,
     manifestVersion: 3,
     name: EXTENSION_NAME,
-    version: "1.12.0",
+    version: JSON.parse(await readFile(new URL("../../manifest.json", import.meta.url), "utf8")).version,
   });
 });
 

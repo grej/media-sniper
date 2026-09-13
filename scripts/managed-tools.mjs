@@ -18,7 +18,7 @@ export const defaultPublicKeyPath = join(
   "packaging/managed-tools/release-public-key.pem",
 );
 export const releasePublicKeyRawBase64 =
-  "QPWXTEbqWGBY7xqwO+TVA1809E28kK0HcDf0QpuWQtM=";
+  "44XFJjYK5JVQyBlZvr8IUwu7w7++++pCMOjJQqQhLik=";
 
 function compareNames(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;

@@ -5,7 +5,7 @@ import Foundation
 enum MediaSniperInstall {
     static let hostName = "com.grej.media_sniper"
     static let extensionOrigin = "chrome-extension://dioapemglpdpmfmoekckbpenmpdgkofp/"
-    static let toolReleasePublicKey = "QPWXTEbqWGBY7xqwO+TVA1809E28kK0HcDf0QpuWQtM="
+    static let toolReleasePublicKey = "44XFJjYK5JVQyBlZvr8IUwu7w7++++pCMOjJQqQhLik="
 
     static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
     static var applicationSupport: URL {

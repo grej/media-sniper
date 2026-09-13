@@ -22,6 +22,8 @@ import {
 } from "../../scripts/managed-tools.mjs";
 import baseManifest from "../../manifest.json";
 // @ts-expect-error JavaScript release helper has no declaration file.
+import { stageCondaInstaller } from "../../scripts/stage-conda-installer.mjs";
+// @ts-expect-error JavaScript release helper has no declaration file.
 import {
   parseArguments,
   validateReleaseArgumentPolicy,
@@ -40,6 +42,13 @@ afterEach(async () => {
 });
 
 describe("extension release variants", () => {
+  it("rejects placeholder disk images before replacing a staged installer", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "media-sniper-placeholder-"));
+    temporaryDirectories.push(directory);
+    const dmg = join(directory, `media-sniper-companion-macos-arm64-development-v${baseManifest.version}.dmg`);
+    await writeFile(dmg, "placeholder installer fixture");
+    await expect(stageCondaInstaller({ dmg, subdir: "osx-arm64" })).rejects.toThrow("real UDIF disk image");
+  });
   it("derives the reviewed stable companion identity", () => {
     expect(extensionIdFromManifestKey(COMPANION_MANIFEST_KEY)).toBe(COMPANION_EXTENSION_ID);
     expect(COMPANION_EXTENSION_ORIGIN).toBe(

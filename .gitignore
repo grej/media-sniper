@@ -11,3 +11,6 @@ coverage/
 companion/target/
 *.log
 *.tsbuildinfo
+
+.build/
+.pixi/

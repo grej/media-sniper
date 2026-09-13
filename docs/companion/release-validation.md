@@ -90,7 +90,9 @@ unpacked-extension reload sequence, see
 - Build the installer and uninstaller apps with both `--sign-identity` and
   `--notary-profile`. Production output is refused unless notarization succeeds
   and the stapled ticket validates. `--development` produces a distinctly named
-  non-publishable DMG and keeps local fixture builds workable.
+  development DMG. It may be distributed as the explicitly disclosed
+  development release described in the finalization plan, without claiming
+  Developer ID signing or notarization. Fixtures must never be published.
 - Inspect the installed Brave and Chrome manifests. Each must contain the
   current user's absolute host path and the one exact allowed extension origin.
 - Exercise an update to a new versioned tool directory, a failed health check,
@@ -114,8 +116,11 @@ unpacked-extension reload sequence, see
 
 ## Release record
 
-Attach both extension ZIPs and checksums, both notarized architecture disk
+Attach both extension ZIPs and checksums, both architecture disk
 images and checksums, signed tool manifests and detached signatures,
 compatibility metadata, third-party notices, automated test output, browser
-versions, and the completed acceptance evidence table. Do not publish a
-companion disk image assembled with development tools or ad-hoc signing.
+versions, and the completed acceptance evidence table. Record the signing and
+notarization status accurately for each image. Development distributions
+must include real portable tools, complete source/license materials, and their
+actual validation results; distinguish unperformed clean-account and browser
+acceptance steps from passing automated checks.
