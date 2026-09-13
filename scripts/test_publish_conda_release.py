@@ -26,7 +26,7 @@ class PublicationMetadataTests(unittest.TestCase):
                                              [package], "1.13.1", "fixture-token")
         verify.assert_called_once()
         request = send.call_args.args[0]
-        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.method, "PATCH")
         self.assertEqual(request.full_url, "https://api.anaconda.org/copy/package/gjennings/media-sniper-installer/1.13.1/" + package["basename"])
         self.assertEqual(json.loads(request.data), {"to_owner": "gjennings", "from_channel": "candidate", "to_channel": "main"})
 

@@ -98,11 +98,11 @@ def refresh_latest_version(metadata, packages, version, token):
     require(versions and max(versions, key=lambda value: tuple(map(int, value.split(".")))) == version,
             "Refusing to replace a newer public release with this version")
     # Use the official client's package-copy API for the exact verified files.
-    # No replacement or force option is sent, and both labels are preserved.
+    # Update existing label membership without the replacement/force API.
     for package in packages:
         existing_file(metadata, package, version)
         request = Request(f"{API}/copy/package/{OWNER}/{PACKAGE}/{version}/{package['basename']}",
-                          method="POST", data=json.dumps({"to_owner": OWNER,
+                          method="PATCH", data=json.dumps({"to_owner": OWNER,
                           "from_channel": "candidate", "to_channel": "main"}).encode(),
                           headers={"Content-Type": "application/json", "Authorization": f"token {token}"})
         with urlopen(request, timeout=45) as response:
