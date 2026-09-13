@@ -74,15 +74,36 @@ def existing_file(metadata, package, version):
     return result
 
 
-def wait_for_files(packages, version, labels):
+def wait_for_files(packages, version, labels, latest=False):
     for attempt in range(12):
         metadata = package_metadata()
         files = [existing_file(metadata, package, version) for package in packages]
-        if all(file and labels.intersection(file.get("labels", [])) for file in files):
+        if all(file and labels.intersection(file.get("labels", [])) for file in files) and (
+                not latest or metadata.get("latest_version") == version):
             return metadata
         if attempt < 11:
             time.sleep(10)
-    raise RuntimeError(f"Published files are not visible with labels {sorted(labels)}")
+    raise RuntimeError(f"Published files or latest-version metadata are not ready for {version}")
+
+
+def refresh_latest_version(metadata, version, token):
+    # Label promotion can leave Anaconda's public latest_version at the old
+    # release. Only advance it after both exact files are verified on main.
+    stable = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    versions = {file.get("version") for file in metadata["files"]
+                if file.get("owner") == OWNER and "main" in file.get("labels", [])
+                and file.get("attrs", {}).get("subdir") in SUBDIRS
+                and isinstance(file.get("version"), str)
+                and re.fullmatch(stable, file["version"])}
+    require(versions and max(versions, key=lambda value: tuple(map(int, value.split(".")))) == version,
+            "Refusing to replace a newer public release with this version")
+    # This is the official client's update_package public_attrs API. Keep all
+    # other package attributes and every uploaded file unchanged.
+    request = Request(f"{API}/package/{OWNER}/{PACKAGE}", method="PATCH",
+                      data=json.dumps({"public_attrs": {"latest_version": version}}).encode(),
+                      headers={"Content-Type": "application/json", "Authorization": f"token {token}"})
+    with urlopen(request, timeout=45) as response:
+        require(response.status == 200, "Anaconda did not confirm the metadata update")
 
 
 def add_main_label(package, version, token):
@@ -132,9 +153,11 @@ def main():
             if "main" not in existing_file(metadata, package, version).get("labels", []):
                 add_main_label(package, version, token)
         print(f"Promoted both verified {version} installers to main", flush=True)
+        metadata = wait_for_files(packages, version, {"main"})
+        if metadata.get("latest_version") != version:
+            refresh_latest_version(metadata, version, token)
 
-    metadata = wait_for_files(packages, version, {"main"})
-    require(metadata["latest_version"] == version, "Published version is not Anaconda's latest release")
+    wait_for_files(packages, version, {"main"}, latest=True)
     print(f"Public Anaconda metadata confirms {version} on both Mac architectures", flush=True)
 
 

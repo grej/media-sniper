@@ -27,6 +27,12 @@ files are reused on retry; a hash, owner, or architecture mismatch stops the
 job instead of overwriting a package. The token is provided only to the
 publishing step and is never written to the checkout.
 
+After promotion, the publisher refreshes Anaconda's public `latest_version`
+attribute if label promotion left it stale. Both exact files must first be
+verified on `main`; a newer stable release on `main` prevents downgrading
+the advertised version. Publication waits for both the files and the latest
+version marker before reporting success.
+
 After publishing, verify both platforms resolve from the public channel and
 pass the response from
 `https://api.anaconda.org/package/gjennings/media-sniper-installer` to

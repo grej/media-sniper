@@ -36,6 +36,8 @@ jobs:
           pixi-version: v0.65.0
           run-install: false
           global-environments: rattler-build=0.61.2
+      - name: Test publication safeguards
+        run: python3 -m unittest discover -s scripts -p 'test_publish_conda_release.py'
       - name: Download and verify the published packages
         run: python3 scripts/publish-conda-release.py prepare "$RELEASE_TAG" "$RUNNER_TEMP/media-sniper-conda"
       - name: Publish candidate files and promote verified files to main
