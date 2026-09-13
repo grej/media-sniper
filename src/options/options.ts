@@ -143,6 +143,11 @@ function switchView(viewId: string): void {
 function loadAboutSection(): void {
   const el = document.getElementById("about-version");
   if (el) el.textContent = chrome.runtime.getManifest().version;
+  if (__COMPANION_BUILD__) {
+    void import("./companion-update-settings").then(({ mountCompanionUpdateSettings }) => {
+      mountCompanionUpdateSettings();
+    });
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -995,6 +1000,10 @@ function showHistoryDisabled(): void {
 }
 
 function renderHistoryItem(state: DownloadState): HTMLElement {
+  const isCompanionOutput =
+    typeof __COMPANION_BUILD__ !== "undefined" &&
+    __COMPANION_BUILD__ &&
+    state.operation?.backend === "yt-dlp";
   const item = document.createElement("div");
   item.className = "history-item" + (selectedIds.has(state.id) ? " selected" : "");
   item.dataset.id = state.id;
@@ -1037,7 +1046,7 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
 
   const badges = document.createElement("div");
   badges.className = "history-badges";
-  badges.appendChild(makeBadge(state.metadata.format, "badge-format"));
+  badges.appendChild(makeBadge(isCompanionOutput ? "companion" : state.metadata.format, "badge-format"));
   if (state.operation?.kind === "clip" && state.operation.clip) {
     badges.appendChild(makeBadge("clip", "badge-clip"));
   }
@@ -1128,6 +1137,10 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   if (state.progress.stage === DownloadStage.COMPLETED && state.localPath) {
     const localPath = state.localPath;
     menu.appendChild(makeMenuItem(iconFolder(), "Open file", async () => {
+      if (isCompanionOutput) {
+        await chrome.runtime.sendMessage({ type: "COMPANION_OPEN", payload: { id: state.id } });
+        return;
+      }
       const filename = localPath.split(/[/\\]/).pop();
       if (!filename) return;
       const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) =>
@@ -1142,7 +1155,12 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   }
 
   // Upload to cloud (completed only, not while uploading)
-  if (state.progress.stage === DownloadStage.COMPLETED && !state.metadata.hasDrm) {
+  if (state.progress.stage === DownloadStage.COMPLETED && isCompanionOutput) {
+    const unavailable = makeMenuItem(iconUpload(), "Cloud upload unavailable for companion files", () => undefined);
+    unavailable.disabled = true;
+    unavailable.title = "Companion output stays outside browser memory in v1.";
+    menu.appendChild(unavailable);
+  } else if (state.progress.stage === DownloadStage.COMPLETED && !state.metadata.hasDrm) {
     const uploadLabel = state.uploadError ? "Retry upload" : "Upload to cloud";
     menu.appendChild(makeMenuItem(iconUpload(), uploadLabel, () => handleHistoryUpload(state.id)));
   }
@@ -1152,13 +1170,21 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     menu.appendChild(makeMenuItem(iconX(), "Cancel upload", () => cancelUpload(state.id)));
   }
 
-  menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state)));
+  if (isCompanionOutput) {
+    menu.appendChild(makeMenuItem(iconDownload(), "Analyze active page again", () => {
+      showToast("Open the source page and use Analyze this page with yt-dlp.", "warning");
+    }));
+  } else {
+    menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state)));
+  }
   menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", async () => {
     await navigator.clipboard.writeText(state.url);
     showToast("URL copied to clipboard", "success");
   }));
 
-  menu.appendChild(makeMenuItem(iconLink(), "Check manifest", () => checkManifest(state.url)));
+  if (!isCompanionOutput) {
+    menu.appendChild(makeMenuItem(iconLink(), "Check manifest", () => checkManifest(state.url)));
+  }
 
   menu.appendChild(makeMenuItem(iconTrash(), "Delete", async () => {
     // Cancel upload first if one is in progress for this item

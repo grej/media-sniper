@@ -3,6 +3,7 @@
  */
 
 import type { ClipSpec, ManifestQualitySelection } from "../clipping/types";
+import type { YtDlpMediaSummary } from "../companion/types";
 
 export enum VideoFormat {
   DIRECT = "direct",
@@ -11,6 +12,22 @@ export enum VideoFormat {
   DASH = "dash",
   UNKNOWN = "unknown",
 }
+
+export interface BrowserMediaSource {
+  kind: "browser";
+  mediaUrl: string;
+  format: VideoFormat;
+  pageUrl: string;
+}
+
+export interface YtDlpMediaSource {
+  kind: "yt-dlp";
+  pageUrl: string;
+  extractorKey?: string;
+  mediaId?: string;
+}
+
+export type MediaSource = BrowserMediaSource | YtDlpMediaSource;
 
 export type DirectMediaAssetKind = "progressive" | "self-contained-fmp4";
 
@@ -55,6 +72,32 @@ export interface VideoMetadata {
   contentLength?: number; // Complete resource size when known from Content-Length/Range
   isSelfContainedFmp4?: boolean; // .m4s containing ftyp+moov followed by moof+mdat
   mediaAssets?: DirectMediaAsset[]; // Complete direct variants associated with this page video
+  /** New records identify their backend explicitly; legacy rows normalize on read. */
+  source?: MediaSource;
+}
+
+/** yt-dlp cards never masquerade a webpage as a browser-fetchable media URL. */
+export interface YtDlpVideoMetadata {
+  source: YtDlpMediaSource;
+  summary: YtDlpMediaSummary;
+  title?: string;
+  duration?: number;
+  thumbnail?: string;
+  hasDrm?: boolean;
+  isLive?: boolean;
+}
+
+export function normalizeVideoMetadataSource(metadata: VideoMetadata): VideoMetadata {
+  if (metadata.source) return metadata;
+  return {
+    ...metadata,
+    source: {
+      kind: "browser",
+      mediaUrl: metadata.url,
+      format: metadata.format,
+      pageUrl: metadata.pageUrl,
+    },
+  };
 }
 
 export interface VideoQuality {
@@ -97,6 +140,18 @@ export interface MediaOperation {
   manifestQuality?: ManifestQualitySelection;
   allowFullFetchForDirect?: boolean;
   outputContainer?: string;
+  backend?: "browser" | "yt-dlp";
+  companion?: {
+    extractorKey: string;
+    mediaId: string;
+    title: string;
+    selectionLabel: string;
+    finalPath?: string;
+    outputToken?: string;
+    errorCode?: string;
+    fallbackReason?: string;
+    fallbackEstimatedBytes?: number;
+  };
 }
 
 export interface DownloadProgress {

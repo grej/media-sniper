@@ -2,9 +2,15 @@
 
 node_modules/
 dist/
+dist-companion/
 artifacts/
+packaging/conda/payload/
 playwright-report/
 test-results/
 coverage/
+companion/target/
 *.log
 *.tsbuildinfo
+
+.build/
+.pixi/

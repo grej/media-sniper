@@ -144,6 +144,35 @@ describe("DirectDetectionHandler", () => {
     handler.destroy();
   });
 
+  it("restores a missing redirect entry from the associated video element", async () => {
+    const detected: VideoMetadata[] = [];
+    const entryUrl = "https://cdn.example/something_720p.mp4?v-acctoken=secret";
+    const finalUrl = "https://cdn.example/remote_control.php?file=protected%2Fvideo_720p.mp4";
+    const video = document.createElement("video");
+    video.src = entryUrl;
+    document.body.append(video);
+    const handler = new DirectDetectionHandler({
+      onVideoDetected: (metadata) => detected.push(metadata),
+    });
+
+    handler.handleNetworkRequest(directObservation({
+      url: finalUrl,
+      entryUrl: finalUrl,
+      redirectChain: [finalUrl],
+      sourceKey: "direct:https://cdn.example/remote_control.php?file=%2Fprotected%2Fvideo_720p.mp4",
+    }));
+    await Promise.resolve();
+
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toMatchObject({
+      url: finalUrl,
+      sourceUrl: entryUrl,
+      sourceKey: "direct:https://cdn.example/something_720p.mp4",
+      redirectChain: [entryUrl, finalUrl],
+    });
+    handler.destroy();
+  });
+
   it("binds an m4s candidate to the page video and marks it as a complete-fMP4 download", async () => {
     const detected: VideoMetadata[] = [];
     const video = document.createElement("video");

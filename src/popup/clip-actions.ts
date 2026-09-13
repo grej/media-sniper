@@ -200,6 +200,59 @@ async function mountEditor(
   return controller;
 }
 
+export interface PageClipEditorOptions {
+  sourceKey: string;
+  pageUrl: string;
+  durationMs?: number;
+  qualities?: ClipEditorQualityOption[];
+  initialQualityKey?: string;
+  onSubmit(value: ClipEditorSubmit): void | Promise<void>;
+  onClose?: () => void;
+}
+
+/**
+ * Reuse the standard popup clip editor for media whose downloadable source is
+ * resolved by another backend. Playback selection still comes from the active
+ * page, so Set start/Set end follow the video the user is watching.
+ */
+export async function createPageClipEditor(
+  options: PageClipEditorOptions,
+): Promise<ClipEditorController> {
+  const [context, settings] = await Promise.all([
+    getActiveTabContext(),
+    loadSettings(),
+  ]);
+  const normalizedPageUrl = normalizeUrl(options.pageUrl);
+  const metadata: VideoMetadata = {
+    url: normalizedPageUrl,
+    format: VideoFormat.UNKNOWN,
+    pageUrl: context.pageUrl || normalizedPageUrl,
+  };
+  const locator: ClipDraftLocator = {
+    tabId: context.tabId,
+    frameId: -1,
+    sourceKey: options.sourceKey,
+  };
+  let draft: ClipDraft | null = null;
+  try { draft = await loadDraft(locator); } catch {}
+  const editorDraft = toEditorDraft(draft);
+  if (editorDraft && options.initialQualityKey) {
+    editorDraft.qualityKey = options.initialQualityKey;
+  }
+
+  return createClipEditor({
+    sourceKey: options.sourceKey,
+    durationMs: options.durationMs,
+    draft: editorDraft,
+    defaultMode: settings.clipping.defaultMode,
+    qualities: options.qualities,
+    getPlayback: playbackProvider(context, metadata),
+    persistDraft: (value) => persistDraft(locator, value, options.qualities),
+    onSubmit: options.onSubmit,
+    onClose: options.onClose,
+  });
+}
+
 export async function toggleDetectedClipEditor(
   button: HTMLElement,
   video: VideoMetadata,

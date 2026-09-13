@@ -17,6 +17,39 @@
           "type": "json",
           "path": "manifest.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packaging/compatibility.json",
+          "jsonpath": "$.extension.standardVersion"
+        },
+        {
+          "type": "json",
+          "path": "packaging/compatibility.json",
+          "jsonpath": "$.extension.companionVersion"
+        },
+        {
+          "type": "json",
+          "path": "packaging/compatibility.json",
+          "jsonpath": "$.nativeHost.companionVersion"
+        },
+        {
+          "type": "toml",
+          "path": "companion/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "yaml",
+          "path": "recipe/recipe.yaml",
+          "jsonpath": "$.context.version"
+        },
+        {
+          "type": "generic",
+          "path": "companion/Cargo.lock"
+        },
+        {
+          "type": "generic",
+          "path": "docs/companion/compatibility.md"
         }
       ]
     }

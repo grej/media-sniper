@@ -1,0 +1,1 @@
+{"protocolVersion":1,"requestId":"golden-probe","type":"probe_result","payload":{"extractorKey":"Generic","mediaId":"fixture-1","webpageUrl":"https://example.com/watch/fixture-1","title":"Fixture media","durationMs":10000,"isLive":false,"selections":[{"kind":"preset","key":"best","label":"Best available"}],"probeToken":"opaque-fixture-token","probedAt":1788019200000}}

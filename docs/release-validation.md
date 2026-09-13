@@ -18,8 +18,10 @@ npm run package:check
 
 `npm run package` performs a production build, then creates:
 
-- `artifacts/media-sniper-extension-v<version>.zip`
-- `artifacts/media-sniper-extension-v<version>.zip.sha256`
+- `artifacts/media-sniper-extension-standard-v<version>.zip`
+- `artifacts/media-sniper-extension-standard-v<version>.zip.sha256`
+- `artifacts/media-sniper-extension-companion-v<version>.zip`
+- `artifacts/media-sniper-extension-companion-v<version>.zip.sha256`
 
 The ZIP builder sorts paths byte-for-byte, stores every entry without
 host-dependent compression, fixes all entry timestamps to 1980-01-01, and
@@ -27,14 +29,20 @@ excludes filesystem permissions and comments. It also packages `LICENSE` and
 `THIRD_PARTY_NOTICES.md` alongside the extension files. The checksum file uses
 the conventional `<digest>  <filename>` form.
 
+The standard archive is additionally byte-scanned for companion-only tokens.
+The companion archive is checked for its stable manifest key, exact derived
+extension ID, native-messaging permission, optional cookie permission, and
+compatibility metadata. The native macOS release has additional gates in
+[Companion release validation](companion/release-validation.md).
+
 To prove reproducibility locally, preserve the first output outside
 `artifacts/`, package again, and compare both bytes and hashes:
 
 ```bash
 npm run package
-cp artifacts/media-sniper-extension-v1.12.0.zip /tmp/media-sniper-first.zip
+cp artifacts/media-sniper-extension-standard-v1.12.0.zip /tmp/media-sniper-first.zip
 npm run package
-cmp /tmp/media-sniper-first.zip artifacts/media-sniper-extension-v1.12.0.zip
+cmp /tmp/media-sniper-first.zip artifacts/media-sniper-extension-standard-v1.12.0.zip
 npm run package:check
 ```
 
@@ -42,8 +50,8 @@ The two `npm run package` invocations must report the same SHA-256 digest and
 `cmp` must exit successfully. Also inspect the archive before upload:
 
 ```bash
-unzip -t artifacts/media-sniper-extension-v1.12.0.zip
-unzip -l artifacts/media-sniper-extension-v1.12.0.zip
+unzip -t artifacts/media-sniper-extension-standard-v1.12.0.zip
+unzip -l artifacts/media-sniper-extension-standard-v1.12.0.zip
 ```
 
 Confirm that `manifest.json`, `background.js`, `content.js`, popup/options and

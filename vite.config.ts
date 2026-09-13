@@ -1,22 +1,44 @@
 import { defineConfig } from 'vite';
 import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { renameSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { build as viteBuild } from 'vite';
+import {
+  DEFAULT_COMPANION_INSTALL_URL,
+  makeVariantManifest,
+  variantForMode,
+} from './build/extension-variants.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode }) => {
-  const isProduction = mode === 'production';
+  const variant = variantForMode(mode);
+  const isCompanion = variant === 'companion';
+  const isProduction = mode !== 'development';
+  const outputDirectory = isCompanion ? 'dist-companion' : 'dist';
+  const companionInstallUrl = isCompanion
+    ? process.env.MEDIA_SNIPER_COMPANION_INSTALL_URL ?? DEFAULT_COMPANION_INSTALL_URL
+    : '';
+  const compileTimeConstants = {
+    __COMPANION_BUILD__: JSON.stringify(isCompanion),
+    __COMPANION_INSTALL_URL__: JSON.stringify(companionInstallUrl),
+  };
 
   return {
+    define: compileTimeConstants,
     build: {
-      outDir: 'dist',
+      outDir: outputDirectory,
       emptyOutDir: true,
       rollupOptions: {
         input: {
-          'background': resolve(__dirname, 'src/service-worker.ts'),
+          // Chromium MV3 service workers do not support dynamic import(). Use
+          // a companion-only entry so its native-host service is registered
+          // through a static module graph without leaking into the standard
+          // extension build.
+          'background': resolve(
+            __dirname,
+            isCompanion ? 'src/service-worker-companion.ts' : 'src/service-worker.ts',
+          ),
           'offscreen/offscreen': resolve(__dirname, 'src/offscreen/offscreen.html'),
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
@@ -157,22 +179,28 @@ export default defineConfig(({ mode }) => {
           });
         },
       },
-      viteStaticCopy({
-        targets: [
-          {
-            src: 'manifest.json',
-            dest: '.',
-          },
-        ],
-      }),
+      {
+        name: 'generate-variant-manifest',
+        buildStart() {
+          const baseManifest = JSON.parse(
+            readFileSync(resolve(__dirname, 'manifest.json'), 'utf8'),
+          );
+          const manifest = makeVariantManifest(baseManifest, variant);
+          this.emitFile({
+            type: 'asset',
+            fileName: 'manifest.json',
+            source: `${JSON.stringify(manifest, null, 2)}\n`,
+          });
+        },
+      },
       // Plugin to move HTML files to correct locations and fix script paths
       {
         name: 'move-html-files',
         closeBundle() {
           const htmlMoves = [
-            { from: 'dist/src/popup/popup.html', to: 'dist/popup/popup.html' },
-            { from: 'dist/src/options/options.html', to: 'dist/options/options.html' },
-            { from: 'dist/src/offscreen/offscreen.html', to: 'dist/offscreen/offscreen.html' },
+            { from: `${outputDirectory}/src/popup/popup.html`, to: `${outputDirectory}/popup/popup.html` },
+            { from: `${outputDirectory}/src/options/options.html`, to: `${outputDirectory}/options/options.html` },
+            { from: `${outputDirectory}/src/offscreen/offscreen.html`, to: `${outputDirectory}/offscreen/offscreen.html` },
           ];
           
           htmlMoves.forEach(({ from, to }) => {
@@ -183,9 +211,9 @@ export default defineConfig(({ mode }) => {
           
           // Fix script paths to be relative
           const htmlFiles = [
-            'dist/popup/popup.html',
-            'dist/options/options.html',
-            'dist/offscreen/offscreen.html',
+            `${outputDirectory}/popup/popup.html`,
+            `${outputDirectory}/options/options.html`,
+            `${outputDirectory}/offscreen/offscreen.html`,
           ];
           
           htmlFiles.forEach((file) => {
@@ -216,7 +244,7 @@ export default defineConfig(({ mode }) => {
             await viteBuild({
               configFile: false, // Don't use the main config file
               build: {
-                outDir: resolve(__dirname, 'dist'),
+                outDir: resolve(__dirname, outputDirectory),
                 emptyOutDir: false,
                 rollupOptions: {
                   input: resolve(__dirname, 'src/content.ts'),
@@ -236,6 +264,7 @@ export default defineConfig(({ mode }) => {
                 },
                 extensions: ['.ts', '.tsx', '.js'],
               },
+              define: compileTimeConstants,
               optimizeDeps: {
                 exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
               },

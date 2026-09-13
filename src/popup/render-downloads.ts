@@ -170,6 +170,10 @@ function createDownloadCardElement(download: DownloadState): HTMLElement {
  * Render a single download item to HTML string.
  */
 function renderDownloadItem(download: DownloadState): string {
+  const isCompanionOutput =
+    typeof __COMPANION_BUILD__ !== "undefined" &&
+    __COMPANION_BUILD__ &&
+    download.operation?.backend === "yt-dlp";
   const isInProgress =
     download.progress.stage !== DownloadStage.COMPLETED &&
     download.progress.stage !== DownloadStage.FAILED &&
@@ -177,7 +181,7 @@ function renderDownloadItem(download: DownloadState): string {
 
   const title =
     download.metadata.title ||
-    getVideoTitleFromUrl(download.metadata.url);
+    (download.metadata.url ? getVideoTitleFromUrl(download.metadata.url) : "Saved media");
   const stage = download.progress.stage;
   const statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
 
@@ -278,14 +282,18 @@ function renderDownloadItem(download: DownloadState): string {
       ? `${displayWidth}x${displayHeight}`
       : "";
 
-  const actualFormat = getActualFileFormat(download.metadata, download);
+  const actualFormat = isCompanionOutput
+    ? download.operation?.outputContainer?.toUpperCase() ?? null
+    : getActualFileFormat(download.metadata, download);
 
   const date = new Date(download.updatedAt);
   const dateText = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   // Cloud link buttons for completed downloads
   let cloudActions = "";
-  if (stage === DownloadStage.COMPLETED) {
+  if (stage === DownloadStage.COMPLETED && isCompanionOutput) {
+    cloudActions = `<div class="card-cloud-actions"><span title="Companion-written files stay outside browser memory">Cloud upload unavailable for companion files</span></div>`;
+  } else if (stage === DownloadStage.COMPLETED) {
     const driveLink = download.cloudLinks?.googleDrive;
     const s3Link = download.cloudLinks?.s3;
     const uploadError = download.uploadError;
@@ -321,6 +329,8 @@ function renderDownloadItem(download: DownloadState): string {
   } else if (isUploading) {
     // No cancel button for uploads currently — just show progress
     actionButtons = "";
+  } else if (isInProgress && isCompanionOutput) {
+    actionButtons = `<div class="card-actions"><span class="companion-managed-note">Manage this native job from the Videos tab</span></div>`;
   } else if (isInProgress) {
     if (!canCancelDownload(download.progress.stage)) {
       actionButtons = `
@@ -352,7 +362,7 @@ function renderDownloadItem(download: DownloadState): string {
       </div>
       <div class="video-item-content">
         <div class="download-item-header">
-          <div class="download-item-title" title="${escapeHtml(download.metadata.url)}">
+          <div class="download-item-title" title="${escapeHtml(download.metadata.url ?? download.url)}">
             ${escapeHtml(title)}
           </div>
           ${statusBadge}
@@ -360,8 +370,9 @@ function renderDownloadItem(download: DownloadState): string {
         <div class="video-meta">
           ${displayResolution ? `<span class="badge badge-resolution">${escapeHtml(displayResolution)}</span>` : ""}
           ${displayDimensions ? `<span class="badge badge-resolution">${displayDimensions}</span>` : ""}
-          <span class="badge badge-link-type">${escapeHtml(getLinkTypeDisplayName(download.metadata.format))}</span>
-          <span class="badge badge-format">${escapeHtml(getFormatDisplayName(download.metadata.format, actualFormat))}</span>
+          ${isCompanionOutput
+            ? `<span class="badge badge-link-type">Page via companion</span><span class="badge badge-format">${escapeHtml(actualFormat ?? "Media")}</span>`
+            : `<span class="badge badge-link-type">${escapeHtml(getLinkTypeDisplayName(download.metadata.format))}</span><span class="badge badge-format">${escapeHtml(getFormatDisplayName(download.metadata.format, actualFormat))}</span>`}
           ${download.metadata.duration ? `<span class="badge-duration">${formatDuration(download.metadata.duration)}</span>` : ""}
         </div>
         <div style="font-size: 10px; color: var(--text-tertiary); margin-top: 3px;">

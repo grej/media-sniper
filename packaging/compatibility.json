@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "extension": {
+    "standardVersion": "1.13.0",
+    "companionVersion": "1.13.0",
+    "companionExtensionId": "dioapemglpdpmfmoekckbpenmpdgkofp"
+  },
+  "nativeHost": {
+    "name": "com.grej.media_sniper",
+    "companionVersion": "1.13.0",
+    "protocolVersion": 1,
+    "platform": "macos",
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ]
+  },
+  "browsers": {
+    "primary": {
+      "name": "Brave Stable",
+      "minimumTestedVersion": "150.1.92.139"
+    },
+    "secondary": {
+      "name": "Chrome Stable",
+      "minimumTestedVersion": "151.0.7922.138"
+    }
+  },
+  "managedTools": {
+    "versionSource": "signed-managed-tool-manifest",
+    "required": [
+      "yt-dlp",
+      "yt-dlp-ejs",
+      "ffmpeg",
+      "ffprobe",
+      "deno"
+    ],
+    "activation": "versioned-atomic-pointer-with-one-known-good-rollback"
+  }
+}

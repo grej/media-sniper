@@ -1,0 +1,21 @@
+[workspace]
+name = "media-sniper-release"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64"]
+channel-priority = "strict"
+
+[system-requirements]
+macos = "13.0"
+
+[dependencies]
+nodejs = "22.*"
+rust = ">=1.85,<2"
+rattler-build = ">=0.61,<0.62"
+
+[tasks]
+check = "npm run type-check && npm test && cargo fmt --manifest-path companion/Cargo.toml -- --check && cargo test --manifest-path companion/Cargo.toml --all-features && npm run build:variants && npm run package:extensions && npm run package:check"
+"package:conda" = "rattler-build build --recipe recipe/recipe.yaml --output-dir artifacts/conda"
+"package:conda:inspect" = "node scripts/check-conda-installer.mjs && rattler-build package inspect artifacts/conda/osx-arm64/*.conda"
+"package:conda:local-test" = "pixi exec --force-reinstall --channel file://$PWD/artifacts/conda --channel conda-forge media-sniper-installer"
+"package:conda:upload-candidate" = "rattler-build upload anaconda --owner gjennings --channel candidate artifacts/conda/osx-arm64/*.conda artifacts/conda/osx-64/*.conda"
+"package:conda:upload-main" = "rattler-build upload anaconda --owner gjennings --channel main artifacts/conda/osx-arm64/*.conda artifacts/conda/osx-64/*.conda"

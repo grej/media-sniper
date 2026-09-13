@@ -1,0 +1,31 @@
+{
+  "ytDlp": {
+    "version": "2026.08.19",
+    "ejsVersion": "0.8.0",
+    "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_macos",
+    "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202",
+    "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.tar.gz",
+    "sourceSha256": "072aad4f2a7604e92155f61a275a4752dc64046c8f6d90df3710525d94cd37c1"
+  },
+  "deno": {
+    "version": "2.6.9",
+    "arm64": {
+      "url": "https://github.com/denoland/deno/releases/download/v2.6.9/deno-aarch64-apple-darwin.zip",
+      "sha256": "81f8da15540aa7cdcb1e37c13ee15e919b2aa26b65157c2aa69fed7c037dbfa5"
+    },
+    "x86_64": {
+      "url": "https://github.com/denoland/deno/releases/download/v2.6.9/deno-x86_64-apple-darwin.zip",
+      "sha256": "ce1961bde80352d43d1967b5f5b92eb7be66afa7e942700e66b6d7474485a69a"
+    }
+  },
+  "ffmpeg": {
+    "version": "8.0.3",
+    "url": "https://ffmpeg.org/releases/ffmpeg-8.0.3.tar.xz",
+    "sha256": "6136812ea6d4e68bdba27e33c2a94382711cdf4f8602ffef056ff792bd6f9818"
+  },
+  "x264": {
+    "revision": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+    "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+    "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9"
+  }
+}

@@ -66,6 +66,7 @@ export interface OperationKeyInput {
   outputContainer?: string;
   pageUrl?: string;
   referrer?: string;
+  backend?: "browser" | "yt-dlp";
 }
 
 /** A byte range expressed as an offset and byte count. */

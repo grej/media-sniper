@@ -926,6 +926,17 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
+    // The companion build registers a second, narrowly scoped listener from
+    // service-worker-companion.ts. Do not let this legacy router answer those
+    // messages first with its generic "unknown message" response.
+    if (
+      __COMPANION_BUILD__ &&
+      typeof message?.type === "string" &&
+      message.type.startsWith("COMPANION_")
+    ) {
+      return false;
+    }
+
     switch (message.type) {
       case MessageType.DOWNLOAD_REQUEST:
         handleDownloadRequestMessage(message.payload).then(sendResponse);

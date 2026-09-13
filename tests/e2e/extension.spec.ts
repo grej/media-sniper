@@ -1,5 +1,5 @@
 import { expect, test, chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -134,7 +134,7 @@ test("starts as the unpacked Media Sniper MV3 extension", async () => {
     id: harness.extensionId,
     manifestVersion: 3,
     name: EXTENSION_NAME,
-    version: "1.12.0",
+    version: JSON.parse(await readFile(new URL("../../manifest.json", import.meta.url), "utf8")).version,
   });
 });
 
@@ -149,7 +149,16 @@ test("detects a delayed tokenized MP4 through a 302 to a PHP 206 proxy", async (
   await page.goto(fixtureUrl);
   const tabId = await queryFixtureTabId(harness.serviceWorker, fixtureUrl);
 
-  await expect.poll(() => detectedVideoCountForTab(tabId)).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const [video] = await detectedVideosForTab(tabId);
+    return {
+      sourceUrl: video?.sourceUrl,
+      redirectCount: Array.isArray(video?.redirectChain) ? video.redirectChain.length : 0,
+    };
+  }).toEqual({
+    sourceUrl: expect.stringContaining("something_720p.mp4?v-acctoken="),
+    redirectCount: 2,
+  });
   const videos = await detectedVideosForTab(tabId);
   expect(videos).toHaveLength(1);
   expect(videos[0]).toMatchObject({

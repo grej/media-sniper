@@ -73,6 +73,13 @@ describe("download v4 operation defaults", () => {
     expect(migrated.operation).toEqual({
       kind: "download",
       operationKey: "legacy:legacy-id",
+      backend: "browser",
+    });
+    expect(migrated.metadata.source).toEqual({
+      kind: "browser",
+      mediaUrl: migrated.metadata.url,
+      format: VideoFormat.DIRECT,
+      pageUrl: migrated.metadata.pageUrl,
     });
   });
 
@@ -86,9 +93,10 @@ describe("download v4 operation defaults", () => {
     const state = legacyState(DownloadStage.COMPLETED);
     state.operation = {
       kind: "clip",
-      operationKey: "clip-key",
+      operationKey: 'media-operation:{"version":1,"url":"legacy"}',
       requestedDurationMs: 5_000,
     };
-    expect(withOperationDefaults(state)).toBe(state);
+    expect(withOperationDefaults(state).operation).toBe(state.operation);
+    expect(withOperationDefaults(state).operation?.operationKey).toContain('"version":1');
   });
 });
