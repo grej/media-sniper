@@ -24,6 +24,16 @@ that point. Denying it leaves anonymous operation available. The advanced
 Brave-profile fallback is broader, may show a macOS Keychain prompt, and is
 never selected automatically.
 
+## Music and audio downloads
+
+Choose **Audio only (MP3)** to save high-quality MP3 audio. Pages with only
+known audio formats select this automatically. When supplied by
+the source, Media Sniper embeds the track title, artist, album, album artist,
+release year, track/disc number, and genre. Existing audio-file tags are
+preserved where possible. Missing fields stay unfilled; upload dates and
+channel names are not substituted for release years and artists.
+Audio clips also use MP3, including the approved full-source fallback.
+
 ## Recovery states
 
 | Status | Action in Media Sniper |

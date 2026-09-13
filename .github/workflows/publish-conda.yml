@@ -6,7 +6,7 @@ on:
       tag:
         description: Published GitHub release containing both tested Mac packages
         required: true
-        default: v1.13.0
+        default: v1.13.1
         type: string
   release:
     types: [published]

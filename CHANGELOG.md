@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.13.1] - 2026-09-13
+
+### Audio downloads
+
+- Default the yt-dlp Audio only choice to high-quality MP3, including audio clips and their approved full-source fallback.
+- Embed supplied track title, artist, album, album artist, release year, track/disc number, and genre; preserve existing file tags where possible.
+- Keep unavailable music fields unfilled instead of substituting upload dates or uploader names.
+- Bundle statically linked LAME 3.100 in both Mac FFmpeg builds so MP3 encoding works without extra installations.
+
 ## [1.13.0] - 2026-09-12
 
 ### New Features

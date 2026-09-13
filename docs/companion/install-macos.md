@@ -29,7 +29,7 @@ status accurately.
 
 ### Install with Pixi
 
-Version 1.13.0 is also published for both Mac architectures on the
+Releases are also published for both Mac architectures on the
 [`gjennings` Anaconda channel](https://anaconda.org/gjennings/media-sniper-installer).
 If you have Pixi installed, this command launches the same graphical installer:
 
@@ -42,7 +42,7 @@ Pixi is only an installer transport and is not required at runtime.
 ## Update
 
 The automatic update checker reads the Anaconda channel and recognizes the
-published 1.13.0 installer on both Mac architectures. It checks at most once
+latest published installer on both Mac architectures. It checks at most once
 per day. When it finds a newer version, the popup shows
 **Media Sniper update available**.
 

@@ -23,6 +23,11 @@
     "url": "https://ffmpeg.org/releases/ffmpeg-8.0.3.tar.xz",
     "sha256": "6136812ea6d4e68bdba27e33c2a94382711cdf4f8602ffef056ff792bd6f9818"
   },
+  "lame": {
+    "version": "3.100",
+    "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+    "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
+  },
   "x264": {
     "revision": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
     "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",

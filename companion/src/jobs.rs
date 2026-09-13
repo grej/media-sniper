@@ -22,6 +22,9 @@ use std::sync::{Arc, Mutex};
 const YTDLP_FILE_MARKER: &str = "MEDIA_SNIPER_FILE:";
 const YTDLP_PROGRESS_MARKER: &str = "MEDIA_SNIPER_PROGRESS:";
 
+#[cfg(test)]
+mod audio_tests;
+
 pub type EventSink = Arc<dyn Fn(Envelope) + Send + Sync>;
 
 #[derive(Clone)]
@@ -468,9 +471,13 @@ impl JobExecutor {
             Some("Creating clip locally"),
             None,
         );
-        let output = context.path().join(match request.clip.mode {
-            ClipMode::Fast => "fallback-clip.mkv",
-            ClipMode::Exact => "fallback-clip.mp4",
+        let output = context.path().join(if selection.audio_only {
+            "fallback-clip.mp3"
+        } else {
+            match request.clip.mode {
+                ClipMode::Fast => "fallback-clip.mkv",
+                ClipMode::Exact => "fallback-clip.mp4",
+            }
         });
         let args = ffmpeg_clip_args(&source, &output, &request.clip, selection.audio_only);
         let process = self.runner.run(
@@ -759,8 +766,31 @@ pub fn yt_dlp_download_args(
         args.extend([
             "--extract-audio".to_owned(),
             "--audio-format".to_owned(),
-            "best".to_owned(),
+            "mp3".to_owned(),
+            "--audio-quality".to_owned(),
+            "0".to_owned(),
+            "--embed-metadata".to_owned(),
+            // Suppress yt-dlp's generic defaults (upload date, uploader, page
+            // URL, and description). Keep existing file tags and add only
+            // supplied music fields below; missing values are not invented.
+            "--parse-metadata".to_owned(),
+            ":(?P<meta_>)".to_owned(),
         ]);
+        for (tag, source) in [
+            ("title", "%(track,title|)s"),
+            ("artist", "%(artist,artists,creator,creators|)l"),
+            ("album", "%(album|)s"),
+            ("album_artist", "%(album_artist,album_artists|)l"),
+            ("date", "%(release_year,release_date>%Y|)s"),
+            ("track", "%(track_number|)s"),
+            ("disc", "%(disc_number|)s"),
+            ("genre", "%(genre,genres|)l"),
+        ] {
+            args.extend([
+                "--parse-metadata".to_owned(),
+                format!("{source}:(?s)(?P<meta_{tag}>.+)"),
+            ]);
+        }
     }
     if let Some(clip) = clip {
         args.extend([
@@ -802,7 +832,12 @@ pub fn ffmpeg_clip_args(
         decimal_seconds(clip.end_ms - clip.start_ms),
     ];
     if audio_only {
-        args.extend(["-map".to_owned(), "0:a:0".to_owned()]);
+        args.extend([
+            "-map".to_owned(),
+            "0:a:0".to_owned(),
+            "-map_metadata".to_owned(),
+            "0".to_owned(),
+        ]);
     } else {
         args.extend([
             "-map".to_owned(),
@@ -814,7 +849,12 @@ pub fn ffmpeg_clip_args(
     match clip.mode {
         ClipMode::Fast => args.extend(["-c".to_owned(), "copy".to_owned()]),
         ClipMode::Exact if audio_only => {
-            args.extend(["-c:a".to_owned(), "aac".to_owned()]);
+            args.extend([
+                "-c:a".to_owned(),
+                "libmp3lame".to_owned(),
+                "-q:a".to_owned(),
+                "0".to_owned(),
+            ]);
         }
         ClipMode::Exact => args.extend([
             "-c:v".to_owned(),

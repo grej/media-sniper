@@ -34,6 +34,7 @@ function run(command, args) {
 await verifyHash(join(downloads, "yt-dlp_macos"), sources.ytDlp.sha256);
 await verifyHash(join(downloads, `yt-dlp-${sources.ytDlp.version}.tar.gz`), sources.ytDlp.sourceSha256);
 await verifyHash(join(nativeBuild, "downloads", `ffmpeg-${sources.ffmpeg.version}.tar.xz`), sources.ffmpeg.sha256);
+await verifyHash(join(nativeBuild, "downloads", `lame-${sources.lame.version}.tar.gz`), sources.lame.sha256);
 await verifyHash(join(nativeBuild, "downloads", `x264-${sources.x264.revision}.tar.gz`), sources.x264.sha256);
 const denoArchive = join(downloads, target === "arm64" ? "deno-aarch64-apple-darwin.zip" : "deno-x86_64-apple-darwin.zip");
 await verifyHash(denoArchive, sources.deno[target].sha256);
@@ -54,6 +55,7 @@ for (const [source, name] of [
   [join(nativeBuild, "sources/ffmpeg/COPYING.GPLv2"), "FFmpeg-GPLv2.txt"],
   [join(nativeBuild, "sources/ffmpeg/COPYING.GPLv3"), "GPLv3.txt"],
   [join(nativeBuild, "sources/x264/COPYING"), "x264-GPLv2.txt"],
+  [join(nativeBuild, "sources/lame/COPYING"), "LAME-LGPLv2.txt"],
   [join(downloads, "yt-dlp-source/LICENSE"), "yt-dlp-Unlicense.txt"],
   [join(downloads, "YT-DLP-THIRD-PARTY-LICENSES.txt"), "yt-dlp-third-party.txt"],
   [join(downloads, "DENO-LICENSE.md"), "Deno-MIT.txt"],

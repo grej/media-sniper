@@ -13,9 +13,18 @@ case "$build_root" in /*) ;; *) echo "Build directory must be absolute" >&2; exi
 
 source_root="$build_root/sources"
 prefix="$build_root/$target/prefix"
-mkdir -p "$prefix" "$build_root/$target/x264" "$build_root/$target/ffmpeg"
+mkdir -p "$prefix" "$build_root/$target/x264" "$build_root/$target/lame" "$build_root/$target/ffmpeg"
 compiler="clang -arch $target -mmacosx-version-min=13.0"
 export MACOSX_DEPLOYMENT_TARGET=13.0
+
+cd "$build_root/$target/lame"
+CC="$compiler" "$source_root/lame/configure" \
+  --host="$host" --prefix="$prefix" --enable-static --disable-shared \
+  --disable-frontend --disable-gtktest --disable-nasm \
+  CFLAGS="-O2 -arch $target -mmacosx-version-min=13.0" \
+  LDFLAGS="-arch $target -mmacosx-version-min=13.0"
+make -j4
+make install
 
 cd "$build_root/$target/x264"
 CC="$compiler" "$source_root/x264/configure" \
@@ -32,7 +41,7 @@ PKG_CONFIG_PATH="$prefix/lib/pkgconfig" "$source_root/ffmpeg/configure" \
   --cc="$compiler" --cxx="clang++ -arch $target -mmacosx-version-min=13.0" \
   --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib" \
   --pkg-config-flags=--static --disable-autodetect \
-  --enable-static --disable-shared --enable-gpl --enable-libx264 \
+  --enable-static --disable-shared --enable-gpl --enable-libx264 --enable-libmp3lame \
   --enable-securetransport --enable-videotoolbox --enable-audiotoolbox \
   --enable-zlib --disable-doc --disable-debug --disable-ffplay
 make -j4

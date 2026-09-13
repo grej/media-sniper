@@ -341,6 +341,12 @@ fn build_selections(
     duration_ms: Option<u64>,
 ) -> HashMap<String, CachedSelection> {
     let estimates = selection_estimates(formats, duration_ms);
+    let exclusively_audio = formats.and_then(Value::as_array).is_some_and(|formats| {
+        formats
+            .iter()
+            .all(|format| format.get("vcodec").and_then(Value::as_str) == Some("none"))
+            && formats.iter().filter_map(Value::as_object).any(has_audio)
+    });
     [
         (
             "best",
@@ -370,9 +376,16 @@ fn build_selections(
             None,
             false,
         ),
-        ("audio-only", "Audio only", "bestaudio/best", None, true),
+        (
+            "audio-only",
+            "Audio only (MP3)",
+            "bestaudio/best",
+            Some("mp3"),
+            true,
+        ),
     ]
     .into_iter()
+    .filter(|(_, _, _, _, audio_only)| !exclusively_audio || *audio_only)
     .map(|(key, label, selector, container, audio_only)| {
         (
             key.to_owned(),
@@ -601,6 +614,44 @@ mod tests {
     use crate::protocol::{CookieRecord, CookieSameSite};
     use crate::tools::ToolPaths;
     use serde_json::json;
+
+    #[test]
+    fn known_audio_pages_default_to_mp3_without_hiding_unknown_video_formats() {
+        for (formats, expected_count) in [
+            (json!([{"vcodec":"none","acodec":"opus"}]), 1),
+            (
+                json!([{"vcodec":"none","acodec":"opus"}, {"vcodec":"h264","acodec":"none"}]),
+                5,
+            ),
+            (json!([{"vcodec":"none","acodec":"opus"}, {"ext":"mp4"}]), 5),
+            (json!([]), 5),
+        ] {
+            let (summary, record) = normalize_probe(
+                json!({"id":"music", "title":"Music", "formats":formats}),
+                "https://example.com/music".into(),
+                false,
+            )
+            .unwrap();
+            assert_eq!(summary.selections.len(), expected_count);
+            let SelectionOption::Preset { key, .. } = &summary.selections[0];
+            assert_eq!(
+                key,
+                if expected_count == 1 {
+                    "audio-only"
+                } else {
+                    "best-mp4"
+                }
+            );
+            assert_eq!(
+                record
+                    .selection("audio-only")
+                    .unwrap()
+                    .expected_container
+                    .as_deref(),
+                Some("mp3")
+            );
+        }
+    }
 
     #[test]
     fn normalized_summary_excludes_raw_urls_and_headers() {

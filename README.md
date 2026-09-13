@@ -66,6 +66,7 @@ The main additions and quality-of-life improvements are:
 
 ## Features
 
+- **Music Downloads**: The yt-dlp companion saves audio-only downloads and clips as MP3, with artist, album, release year, and other music tags when supplied by the source. The MP3 encoder is included in both Mac installers.
 - **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), direct video URLs (`.mp4`, `.webm`, etc.), and self-contained fragmented MP4 (`.m4s`)
 - **Automatic Video Detection**: Detects late-assigned media elements, tokenized progressive video, redirects, and range-backed media proxy responses
 - **In-browser Clipping**: Create timestamped MP4 clips in Fast (keyframe-aligned) or Exact mode without a helper service

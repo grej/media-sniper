@@ -33,7 +33,10 @@ the MIT License. Source, license, and version information:
 FFmpeg and ffprobe 8.0.3 are built together from source, with a statically linked
 x264 at revision b35605ace3ddf7c1a5d67a2eb553f034aef41d55. This GPL-enabled
 configuration is GPL 2.0 or later and does not enable nonfree components.
-The matching FFmpeg/x264 source archives and build script accompany the GitHub
+The build also statically links LAME 3.100 for MP3 encoding. LAME is licensed
+under LGPL 2.0 or later; its license and corresponding source are included.
+Project: <https://lame.sourceforge.io/>.
+The matching FFmpeg/x264/LAME source archives and build script accompany the GitHub
 release in the media-tools source archive; license texts and build configuration
 are also included in the tool payload. Pinned upstream URLs and checksums are
 recorded in `provenance/sources.json`. License information:

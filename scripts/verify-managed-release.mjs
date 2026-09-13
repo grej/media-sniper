@@ -54,7 +54,7 @@ try {
     send("probe", { pageUrl, auth: { mode: "anonymous" } });
     const media = await waitFor("probe_result", "probe");
     assert(media.selections.length > 0);
-    const selected = media.selections.find((selection) => !selection.audioOnly) ?? media.selections[0];
+    const selected = media.selections.find((selection) => selection.key !== "audio-only") ?? media.selections[0];
     send("start_download", { jobId: "release-download", probeToken: media.probeToken, selectionKey: selected.key,
       auth: { mode: "anonymous" } }, "download");
     await waitFor("job_completed", "download");
@@ -62,6 +62,26 @@ try {
       clip: { startMs: 1000, endMs: 3000, mode: "exact" }, allowFullDownloadFallback: false,
       auth: { mode: "anonymous" } }, "clip");
     await waitFor("job_completed", "clip");
+    const audio = media.selections.find((selection) => selection.key === "audio-only");
+    assert.equal(audio?.expectedContainer, "mp3");
+    for (const operation of ["download", "clip"]) {
+      const requestId = `audio-${operation}`;
+      send(`start_${operation}`, { jobId: `release-${requestId}`, probeToken: media.probeToken,
+        selectionKey: audio.key, auth: { mode: "anonymous" },
+        ...(operation === "clip" ? { clip: { startMs: 1000, endMs: 3000, mode: "exact" },
+          allowFullDownloadFallback: false } : {}),
+      }, requestId);
+      const completed = await waitFor("job_completed", requestId);
+      assert.equal(completed.container, "mp3");
+      assert(completed.filename.endsWith(".mp3"));
+      const inspected = spawnSync(join(bundle, "payload/bin/ffprobe"), ["-v", "error", "-show_entries",
+        "format=duration:stream=codec_name,codec_type", "-of", "json", completed.finalPath], { encoding: "utf8" });
+      assert.equal(inspected.status, 0, inspected.stderr);
+      const output = JSON.parse(inspected.stdout);
+      assert.equal(output.streams.length, 1);
+      assert.equal(output.streams[0].codec_name, "mp3");
+      if (operation === "clip") assert(Math.abs(Number(output.format.duration) - 2) < 0.1);
+    }
     const outputs = await readdir(join(temporary, "Downloads"));
     assert(outputs.length >= 2);
     const durations = outputs.map((name) => {
@@ -70,14 +90,14 @@ try {
       return Number(JSON.parse(inspected.stdout).format.duration);
     });
     assert(durations.some((duration) => Math.abs(duration - 2) < 0.2), "Exact clip must have the requested two-second duration");
-    console.log("Verified real anonymous probe, download, and Exact clip with the bundled tools");
+    console.log("Verified real anonymous probe, video and MP3 downloads, and Exact clips with the bundled tools");
   }
   await mkdir(join(root, "artifacts/release-validation"), { recursive: true });
   await writeFile(join(root, "artifacts/release-validation/native-smoke.json"), JSON.stringify({
     version, healthy: hello.healthy, companionVersion: hello.companionVersion,
     ytDlpVersion: hello.ytDlpVersion, ffmpegVersion: hello.ffmpegVersion,
     ffprobeVersion: hello.ffprobeVersion, jsRuntime: hello.jsRuntime,
-    pageUrl, verifiedOperations: pageUrl ? ["probe", "download", "exact-clip"] : ["hello"],
+    pageUrl, verifiedOperations: pageUrl ? ["probe", "download", "exact-clip", "mp3-download", "mp3-exact-clip"] : ["hello"],
   }, null, 2) + "\n");
 } finally {
   if (child) { child.stdin.end(); child.kill(); }
